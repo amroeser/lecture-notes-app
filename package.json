@@ -1,7 +1,25 @@
 {
-  "name": "lecture-notes-app",
-  "version": "0.1.0",
-  "private": true,
+  "name": "lecture-batch-summarizer",
+  "version": "1.0.0",
+  "description": "Automatische Verarbeitung von Vorlesungsvideos (MP4) zu strukturierten Lernzusammenfassungen mit KI-gestützter Transkription und PDF-Export.",
+  "keywords": [
+    "lecture",
+    "summarizer",
+    "transcription",
+    "openai",
+    "whisper",
+    "pdf",
+    "nextjs",
+    "education",
+    "ai",
+    "learning"
+  ],
+  "author": "Alexander Maximilian Röser",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amroeser/lecture-notes-app"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -25,7 +43,6 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "playwright": "^1.58.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
