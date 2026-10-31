@@ -284,7 +284,7 @@ function generatePDFFromElements(doc: jsPDF, elements: PDFElement[], title: stri
 }
 
 export async function POST(req: Request) {
-  let payload: any;
+  let payload: { seriesTitle?: unknown; seriesMarkdown?: unknown } | null;
   try {
     payload = await req.json();
   } catch {
@@ -318,9 +318,9 @@ export async function POST(req: Request) {
         'Content-Disposition': `attachment; filename="${fileName}"`,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: `PDF generation failed: ${error?.message || 'Unknown error'}` },
+      { error: `PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
       { status: 500 },
     );
   }

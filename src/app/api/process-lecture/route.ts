@@ -30,7 +30,7 @@ function runFfmpegExtractAudio(args: string[]): Promise<{ stdout: string; stderr
         stderr += d.toString();
       });
 
-      proc.on('error', (err: any) => {
+      proc.on('error', (err: NodeJS.ErrnoException) => {
         if (err?.code === 'ENOENT') {
           if (!triedFallback && cmd !== fallbackCmd) {
             triedFallback = true;
@@ -150,7 +150,7 @@ export async function POST(req: Request) {
       }),
     );
 
-    const cached = await readJsonCache<any>('process-lecture', cacheKey);
+    const cached = await readJsonCache<{ transcript?: string; chapterTitle?: string; chapterMarkdown?: string }>('process-lecture', cacheKey);
     if (cached?.chapterMarkdown && typeof cached?.transcript === 'string') {
       return NextResponse.json({
         fileName: file.name,
@@ -171,7 +171,7 @@ export async function POST(req: Request) {
     const transcriptText = transcription.text ?? '';
 
     step = 'chapter';
-    const chapterReq: any = {
+    const chapterReq: OpenAI.ChatCompletionCreateParamsNonStreaming = {
       model: summaryModel,
       messages: [
         {
@@ -215,8 +215,8 @@ export async function POST(req: Request) {
       chapterTitle,
       chapterMarkdown,
     });
-  } catch (err: any) {
-    const message = typeof err?.message === 'string' ? err.message : 'Unknown error';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
     console.error('[process-lecture] error', { step, message, err });
     return NextResponse.json({ error: message, step }, { status: 500 });
   } finally {
