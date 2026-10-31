@@ -247,7 +247,7 @@ export default function LectureNotesApp() {
           <div>
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-line bg-surface/70 px-3 py-1 text-xs font-medium text-muted backdrop-blur">
               <span className="h-1.5 w-1.5 rounded-full bg-success" />
-              Whisper · GPT · PDF
+              OpenAI · Voxtral · PDF
             </div>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Lecture Batch Summarizer</h1>
             <p className="mt-2 max-w-xl text-pretty text-muted">

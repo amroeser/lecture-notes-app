@@ -102,7 +102,7 @@ cp .env.example .env.local   # add OPENAI_API_KEY
 flowchart LR
     A[MP4 upload] --> B[ffmpeg<br/>16 kHz mono WAV]
     B --> C{Transcription}
-    C -->|OpenAI| D[Transcript]
+    C -->|OpenAI<br/>10 min segments| D[Transcript]
     C -->|Mistral Voxtral<br/>30 min segments| D
     D --> E[LLM: one chapter<br/>per lecture]
     E --> F[LLM: order, merge,<br/>smooth]
@@ -112,7 +112,7 @@ flowchart LR
 ```
 
 1. **Upload.** Pick or drop the MP4 files of a series. Each file gets an ID (`V01`, `V02`, …).
-2. **Transcribe.** ffmpeg extracts the audio. The selected provider transcribes it in German.
+2. **Transcribe.** ffmpeg extracts the audio. The selected provider transcribes it in German. Long recordings are split into segments; each segment gets the end of the previous one as context.
 3. **Write chapters.** A text model turns each transcript into a chapter with the fixed study layout.
 4. **Compile the series.** Chapters are ordered, merged and polished. Big series are compiled in chunks and merged again.
 5. **Check and export.** Guardrails confirm every ID is present, then Markdown and PDF are ready.
@@ -154,7 +154,7 @@ Chapter and series generation always use the OpenAI-compatible text API. Only th
 
 | Provider | Setting | Default model | Notes |
 |---|---|---|---|
-| **OpenAI** | `TRANSCRIBE_PROVIDER=openai` (default) | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` for higher quality. |
+| **OpenAI** | `TRANSCRIBE_PROVIDER=openai` (default) | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` for higher quality. Audio above 24 MB is sent in 10-minute segments (OpenAI's upload limit is 25 MB). |
 | **Mistral Voxtral** | `TRANSCRIBE_PROVIDER=mistral` | `voxtral-small-transcribe-3` | Needs `MISTRAL_API_KEY`. Audio is sent in 30-minute segments and joined in order. `voxtral-mini-transcribe-3` is the cheaper option. |
 
 ```bash
@@ -173,6 +173,7 @@ OPENAI_API_KEY=sk-...
 | `OPENAI_TEXT_API_KEY` / `OPENAI_TEXT_BASE_URL` | No | | Separate credentials for the text models. |
 | `TRANSCRIBE_PROVIDER` | No | `openai` | `openai` or `mistral`. |
 | `OPENAI_TRANSCRIBE_MODEL` | No | `gpt-4o-mini-transcribe` | Transcription model for the OpenAI provider. |
+| `OPENAI_TRANSCRIBE_CHUNK_SECONDS` | No | `600` | Segment length for audio above 24 MB (minimum 60). |
 | `MISTRAL_API_KEY` | With `mistral` | | Mistral API key. |
 | `MISTRAL_BASE_URL` | No | `https://api.mistral.ai/v1` | Mistral API base URL. |
 | `MISTRAL_TRANSCRIBE_MODEL` | No | `voxtral-small-transcribe-3` | Voxtral model. |
