@@ -182,8 +182,11 @@ function generatePDFFromElements(doc: jsPDF, elements: PDFElement[], title: stri
     });
   };
 
-  // Title
-  if (title) {
+  // Title (skipped when the Markdown already opens with the same H1, which the series route always emits)
+  const first = elements[0];
+  const titleIsFirstHeading =
+    first?.type === 'h1' && sanitizeForPdf(first.content).trim() === sanitizeForPdf(title).trim();
+  if (title && !titleIsFirstHeading) {
     writeText(title, 18, true);
     y += 8;
   }
@@ -284,7 +287,7 @@ function generatePDFFromElements(doc: jsPDF, elements: PDFElement[], title: stri
 }
 
 export async function POST(req: Request) {
-  let payload: any;
+  let payload: { seriesTitle?: unknown; seriesMarkdown?: unknown } | null;
   try {
     payload = await req.json();
   } catch {
@@ -318,9 +321,9 @@ export async function POST(req: Request) {
         'Content-Disposition': `attachment; filename="${fileName}"`,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: `PDF generation failed: ${error?.message || 'Unknown error'}` },
+      { error: `PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
       { status: 500 },
     );
   }

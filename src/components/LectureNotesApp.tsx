@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-
-type FileStatus = 'queued' | 'uploading' | 'done' | 'error';
+import { useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Button, Card, CardHeader, Icon, Segmented, Stat, StatusPill, Toggle, cx, type FileStatus } from './ui';
+import { useLocale } from '@/i18n/useLocale';
+import { locales, type Locale, type Messages } from '@/i18n/messages';
 
 interface ProcessedLecture {
   id: string;
@@ -16,90 +19,145 @@ interface ProcessedLecture {
   chapterMarkdown?: string;
 }
 
+interface GuardrailReport {
+  missingIds?: string[];
+  inputCount?: number;
+  order?: string[];
+  [key: string]: unknown;
+}
+
+type OutputTab = 'preview' | 'markdown' | 'guardrails' | 'local';
+
+const today = () => new Date().toISOString().split('T')[0];
+
+function errorMessage(e: unknown, fallback: string) {
+  return e instanceof Error ? e.message : fallback;
+}
+
+function downloadBlob(fileName: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportText(fileName: string, content: string) {
+  downloadBlob(fileName, new Blob([content], { type: 'text/plain' }));
+}
+
+/** Hide the internal <!--VID:Vxx--> markers and page-break divs in the rendered preview. */
+function toPreviewMarkdown(md: string) {
+  return md.replace(/<!--VID:V\d+-->/g, '').replace(/<div class="page-break"><\/div>/g, '\n---\n');
+}
+
 export default function LectureNotesApp() {
+  const { locale, t, setLocale } = useLocale();
   const [items, setItems] = useState<ProcessedLecture[]>([]);
   const [combinedLetter, setCombinedLetter] = useState('');
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [seriesTitle, setSeriesTitle] = useState('');
   const [seriesMarkdown, setSeriesMarkdown] = useState('');
-  const [guardrailReport, setGuardrailReport] = useState<any>(null);
+  const [seriesError, setSeriesError] = useState('');
+  const [guardrailReport, setGuardrailReport] = useState<GuardrailReport | null>(null);
   const [isSeriesRunning, setIsSeriesRunning] = useState(false);
   const [autoGenerateSeries, setAutoGenerateSeries] = useState(true);
   const [autoStartBatch, setAutoStartBatch] = useState(true);
   const [autoDownloadSeries, setAutoDownloadSeries] = useState(true);
   const [autoDownloadPdf, setAutoDownloadPdf] = useState(true);
   const [parallelism, setParallelism] = useState(2);
+  const [activeOutput, setActiveOutput] = useState<OutputTab>('preview');
+  const [isDragging, setIsDragging] = useState(false);
 
-  const [activeOutput, setActiveOutput] = useState<'series' | 'guardrails' | 'local'>('series');
+  // Source of truth for async workers; state mirrors it for rendering.
+  const itemsRef = useRef<ProcessedLecture[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const itemsRef = useRef<ProcessedLecture[]>(items);
-  const pendingAutoBatchRef = useRef(false);
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  useEffect(() => {
-    if (!pendingAutoBatchRef.current) return;
-    if (isBatchRunning) return;
-    const hasQueued = itemsRef.current.some((i) => i.status === 'queued' || i.status === 'error');
-    if (!hasQueued) return;
-    pendingAutoBatchRef.current = false;
-    runBatch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, isBatchRunning]);
+  const updateItems = (fn: (prev: ProcessedLecture[]) => ProcessedLecture[]) => {
+    itemsRef.current = fn(itemsRef.current);
+    setItems(itemsRef.current);
+  };
 
   const doneItems = useMemo(() => items.filter((i) => i.status === 'done'), [items]);
-  const queuedCount = useMemo(() => items.filter((i) => i.status === 'queued').length, [items]);
-  const uploadingCount = useMemo(() => items.filter((i) => i.status === 'uploading').length, [items]);
-  const errorCount = useMemo(() => items.filter((i) => i.status === 'error').length, [items]);
+  const queuedCount = items.filter((i) => i.status === 'queued').length;
+  const uploadingCount = items.filter((i) => i.status === 'uploading').length;
+  const errorCount = items.filter((i) => i.status === 'error').length;
+  const progress = items.length === 0 ? 0 : Math.round(((doneItems.length + errorCount) / items.length) * 100);
+  const missingIds = Array.isArray(guardrailReport?.missingIds) ? guardrailReport.missingIds : null;
 
-  const addFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    const mp4s = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.mp4'));
-    const newItemsBase = mp4s.map((file) => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      file,
-    }));
-
-    setItems((prev) => {
-      const existingIds = new Set(prev.map((p) => p.id));
-      const deduped = newItemsBase.filter((n) => !existingIds.has(n.id));
-      const combined = [...prev, ...deduped.map((d) => ({ ...d, status: 'queued' as const, videoId: '' }))];
-
-      const withIds = combined.map((it, idx) => {
-        const videoId = `V${String(idx + 1).padStart(2, '0')}`;
-        return { ...it, videoId };
+  const exportPdf = async (md: string, title: string) => {
+    if (!md.trim()) return;
+    try {
+      const res = await fetch('/api/series-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seriesTitle: title, seriesMarkdown: md }),
       });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error || `Request failed (${res.status})`);
+      }
+      downloadBlob(`series-${today()}.pdf`, await res.blob());
+    } catch (e) {
+      setSeriesError(t.pdfError(errorMessage(e, t.unknownError)));
+    }
+  };
 
-      return withIds;
-    });
+  const generateSeries = async () => {
+    if (isSeriesRunning) return;
+    setIsSeriesRunning(true);
+    setSeriesError('');
+    try {
+      const chapters = itemsRef.current
+        .filter((i) => i.status === 'done')
+        .map((i) => ({
+          videoId: i.videoId,
+          fileName: i.file.name,
+          transcriptText: i.transcript,
+          chapterTitle: i.chapterTitle,
+          chapterMarkdown: i.chapterMarkdown || i.summary || '',
+        }));
+      if (chapters.length === 0) throw new Error(t.noChapters);
 
-    if (autoStartBatch && !isBatchRunning) {
-      pendingAutoBatchRef.current = true;
+      const res = await fetch('/api/series-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seriesTitle, chapters }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || `Request failed (${res.status})`);
+
+      const md: string = json.seriesMarkdown || '';
+      const report: GuardrailReport | null = json.guardrailReport || null;
+      setSeriesMarkdown(md);
+      setGuardrailReport(report);
+      setActiveOutput('preview');
+
+      const ok = md && Array.isArray(report?.missingIds) && report.missingIds.length === 0;
+      if (ok && autoDownloadSeries) exportText(`series-${today()}.md`, md);
+      if (ok && autoDownloadPdf) await exportPdf(md, seriesTitle);
+    } catch (e) {
+      setSeriesError(t.seriesError(errorMessage(e, t.unknownError)));
+      setGuardrailReport(null);
+    } finally {
+      setIsSeriesRunning(false);
     }
   };
 
   const processOne = async (item: ProcessedLecture) => {
-    setItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'uploading', error: undefined } : p)));
-
+    updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'uploading', error: undefined } : p)));
     try {
       const fd = new FormData();
       fd.append('file', item.file);
-
-      const res = await fetch('/api/process-lecture', {
-        method: 'POST',
-        body: fd,
-      });
-
+      const res = await fetch('/api/process-lecture', { method: 'POST', body: fd });
       const json = await res.json();
       if (!res.ok) {
         const step = typeof json?.step === 'string' ? json.step : '';
         const msg = json?.error || `Request failed (${res.status})`;
         throw new Error(step ? `${msg} (step: ${step})` : msg);
       }
-
-      setItems((prev) =>
+      updateItems((prev) =>
         prev.map((p) =>
           p.id === item.id
             ? {
@@ -113,9 +171,8 @@ export default function LectureNotesApp() {
             : p,
         ),
       );
-    } catch (e: any) {
-      const msg = typeof e?.message === 'string' ? e.message : 'Unknown error';
-      setItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'error', error: msg } : p)));
+    } catch (e) {
+      updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'error', error: errorMessage(e, t.unknownError) } : p)));
     }
   };
 
@@ -123,451 +180,426 @@ export default function LectureNotesApp() {
     if (isBatchRunning) return;
     setIsBatchRunning(true);
     try {
-      const queue = itemsRef.current.filter((i) => i.status === 'queued' || i.status === 'error');
+      // Failed items are retried once per batch; files added while the batch runs are picked up too.
+      const retry = new Set(itemsRef.current.filter((i) => i.status === 'error').map((i) => i.id));
+      const claimed = new Set<string>();
+      const next = () =>
+        itemsRef.current.find((i) => !claimed.has(i.id) && (i.status === 'queued' || (i.status === 'error' && retry.has(i.id))));
+      const pending = itemsRef.current.filter((i) => i.status === 'queued' || i.status === 'error').length;
       const maxWorkers = Math.max(1, Math.min(6, Number(parallelism) || 1));
-      let idx = 0;
-
       const worker = async () => {
-        while (true) {
-          const current = idx;
-          idx += 1;
-          const item = queue[current];
-          if (!item) return;
+        for (let item = next(); item; item = next()) {
+          claimed.add(item.id);
           await processOne(item);
         }
       };
-
-      await Promise.all(Array.from({ length: Math.min(maxWorkers, queue.length) }, () => worker()));
+      await Promise.all(Array.from({ length: Math.min(maxWorkers, Math.max(1, pending)) }, () => worker()));
     } finally {
       setIsBatchRunning(false);
-      if (autoGenerateSeries) {
-        setActiveOutput('series');
-        // Trigger series generation after batch completion
-        setTimeout(() => {
-          const hasDone = itemsRef.current.some((i) => i.status === 'done');
-          if (hasDone) {
-            generateSeries();
-          }
-        }, 0);
-      }
     }
+    if (autoGenerateSeries && itemsRef.current.some((i) => i.status === 'done')) {
+      await generateSeries();
+    }
+  };
+
+  const addFiles = (files: FileList | File[] | null) => {
+    if (!files) return;
+    const mp4s = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.mp4'));
+    if (mp4s.length === 0) return;
+
+    updateItems((prev) => {
+      const existingIds = new Set(prev.map((p) => p.id));
+      const fresh = mp4s
+        .map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}`, file }))
+        .filter((n) => !existingIds.has(n.id))
+        .map((n) => ({ ...n, status: 'queued' as const, videoId: '' }));
+      return [...prev, ...fresh].map((it, idx) => ({ ...it, videoId: `V${String(idx + 1).padStart(2, '0')}` }));
+    });
+
+    if (autoStartBatch && !isBatchRunning) void runBatch();
   };
 
   const generateCombinedLetter = () => {
     const joined = doneItems
       .map((i) => {
         const s = (i.chapterMarkdown || i.summary || '').trim();
-        const title = i.chapterTitle || i.file.name;
-        return `# ${title} <!--VID:${i.videoId}-->\n\n${s || '(keine Summary)'}\n`;
+        return `# ${i.chapterTitle || i.file.name} <!--VID:${i.videoId}-->\n\n${s || t.noSummary}\n`;
       })
       .join('\n');
-
-    const letter = `Lernzusammenfassung (Batch)\nDatum: ${new Date().toLocaleDateString()}\n\n${joined}`.trim();
-    setCombinedLetter(letter);
+    setCombinedLetter(`${t.localDocTitle}\n${t.localDocDate}: ${new Date().toLocaleDateString(locale)}\n\n${joined}`.trim());
+    setActiveOutput('local');
   };
 
-  const exportText = (fileName: string, content: string) => {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const clearAll = () => updateItems(() => []);
 
-  const exportPdf = async (md: string, title: string) => {
-    if (!md.trim()) return;
-    try {
-      const res = await fetch('/api/series-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seriesTitle: title, seriesMarkdown: md }),
-      });
-
-      if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        const msg = json?.error || `Request failed (${res.status})`;
-        throw new Error(msg);
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `series-${new Date().toISOString().split('T')[0]}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      const msg = typeof e?.message === 'string' ? e.message : 'Unknown error';
-      setSeriesMarkdown((prev) => `${prev}\n\n[PDF Export Error] ${msg}`.trim());
-    }
-  };
-
-  const generateSeries = async () => {
-    if (isSeriesRunning) return;
-    setIsSeriesRunning(true);
-    try {
-      const currentDone = itemsRef.current.filter((i) => i.status === 'done');
-      const chapters = currentDone.map((i) => ({
-        videoId: i.videoId,
-        fileName: i.file.name,
-        transcriptText: i.transcript,
-        chapterTitle: i.chapterTitle,
-        chapterMarkdown: i.chapterMarkdown || i.summary || '',
-      }));
-
-      if (chapters.length === 0) {
-        throw new Error('No chapters provided.');
-      }
-
-      const res = await fetch('/api/series-summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seriesTitle, chapters }),
-      });
-
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json?.error || `Request failed (${res.status})`);
-      }
-
-      const md = json.seriesMarkdown || '';
-      const report = json.guardrailReport || null;
-      setSeriesMarkdown(md);
-      setGuardrailReport(report);
-
-      const missing: string[] = Array.isArray(report?.missingIds) ? report.missingIds : [];
-      if (autoDownloadSeries && md && missing.length === 0) {
-        exportText(`series-${new Date().toISOString().split('T')[0]}.md`, md);
-      }
-      if (autoDownloadPdf && md && missing.length === 0) {
-        await exportPdf(md, seriesTitle);
-      }
-    } catch (e: any) {
-      const msg = typeof e?.message === 'string' ? e.message : 'Unknown error';
-      setSeriesMarkdown(`Fehler beim Generieren der Serie: ${msg}`);
-      setGuardrailReport(null);
-    } finally {
-      setIsSeriesRunning(false);
-    }
-  };
+  const tabs: Array<{ id: OutputTab; label: string }> = [
+    { id: 'preview', label: t.tabPreview },
+    { id: 'markdown', label: t.tabMarkdown },
+    { id: 'guardrails', label: t.tabGuardrails },
+    { id: 'local', label: t.tabLocal },
+  ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-6xl mx-auto">
-        <header className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">Lecture Batch Summarizer</h1>
-          <p className="text-gray-600">MP4 Batch Upload → Transkript → perfekte Lern-Zusammenfassung</p>
+    <div className="app-backdrop min-h-screen">
+      <div className="mx-auto max-w-6xl px-4 pb-16 pt-8 sm:px-6 lg:pt-12">
+        {/* ---------- Header ---------- */}
+        <header className="mb-8 flex flex-col gap-6 sm:mb-10 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-line bg-surface/70 px-3 py-1 text-xs font-medium text-muted backdrop-blur">
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
+              OpenAI · Voxtral · PDF
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Lecture Batch Summarizer</h1>
+            <p className="mt-2 max-w-xl text-pretty text-muted">
+              {t.tagline}
+            </p>
+          </div>
+          <div className="flex items-center gap-4 self-start sm:self-auto">
+            <Segmented<Locale>
+              label={t.languageLabel}
+              value={locale}
+              onChange={setLocale}
+              options={locales.map((l) => ({ value: l, label: l.toUpperCase() }))}
+            />
+            <a
+              href="https://github.com/amroeser/lecture-notes-app"
+              className="inline-flex items-center gap-2 text-sm text-muted transition-colors hover:text-foreground"
+            >
+              <Icon.Github /> GitHub
+            </a>
+          </div>
         </header>
 
-        <div className="mb-6 bg-white rounded-lg shadow-lg p-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="text-sm text-gray-700">
-              <span className="font-semibold">Status:</span>{' '}
-              {items.length === 0 ? 'keine Dateien' : `${items.length} Dateien`}
-              {items.length > 0 && (
-                <span>
-                  {' '}· fertig: <span className="font-semibold">{doneItems.length}</span>
-                  {' '}· queued: <span className="font-semibold">{queuedCount}</span>
-                  {' '}· läuft: <span className="font-semibold">{uploadingCount}</span>
-                  {' '}· Fehler: <span className="font-semibold">{errorCount}</span>
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-gray-500">
-              Tipp: Erst <span className="font-semibold">Batch verarbeiten</span>, dann <span className="font-semibold">Server-Output + Guardrails</span>.
-            </div>
+        {/* ---------- Stats ---------- */}
+        <Card className="mb-6 px-5 py-4 sm:px-6" aria-label={t.statusRegion}>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <Stat label={t.statVideos} value={items.length} />
+            <Stat label={t.statDone} value={doneItems.length} tone="success" />
+            <Stat label={t.statActive} value={uploadingCount + queuedCount} tone="accent" />
+            <Stat label={t.statErrors} value={errorCount} tone="danger" />
           </div>
-        </div>
+          <div
+            className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-muted"
+            role="progressbar"
+            aria-label={t.progress}
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${progress}%` }} />
+          </div>
+        </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-semibold mb-1 text-gray-800">1) Upload & Verarbeitung</h2>
-            <p className="text-sm text-gray-600 mb-4">Wähle alle Videos der Serie aus und starte danach die Verarbeitung.</p>
-
-            <div className="space-y-4">
-              <input
-                value={seriesTitle}
-                onChange={(e) => setSeriesTitle(e.target.value)}
-                placeholder="Serientitel (optional)"
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm"
-              />
-
-              <label className="flex items-center gap-2 text-sm text-gray-700">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          {/* ---------- 1) Upload ---------- */}
+          <Card className="lg:col-span-2">
+            <CardHeader step={1} title={t.uploadTitle} description={t.uploadDescription} />
+            <div className="space-y-5 p-5 sm:p-6">
+              <div>
+                <label htmlFor="series-title" className="mb-1.5 block text-sm font-medium">
+                  {t.seriesTitleLabel} <span className="font-normal text-muted">{t.optional}</span>
+                </label>
                 <input
-                  type="checkbox"
-                  checked={autoGenerateSeries}
-                  onChange={(e) => setAutoGenerateSeries(e.target.checked)}
-                  className="h-4 w-4"
+                  id="series-title"
+                  value={seriesTitle}
+                  onChange={(e) => setSeriesTitle(e.target.value)}
+                  placeholder={t.seriesTitlePlaceholder}
+                  className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 />
-                Serie nach Batch automatisch generieren
-              </label>
-
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={autoStartBatch}
-                  onChange={(e) => setAutoStartBatch(e.target.checked)}
-                  disabled={isBatchRunning}
-                  className="h-4 w-4 disabled:opacity-50"
-                />
-                Batch nach Dateiauswahl automatisch starten
-              </label>
-
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={autoDownloadSeries}
-                  onChange={(e) => setAutoDownloadSeries(e.target.checked)}
-                  className="h-4 w-4"
-                />
-                Finale Serie automatisch herunterladen (nur wenn Guardrails OK)
-              </label>
-
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={autoDownloadPdf}
-                  onChange={(e) => setAutoDownloadPdf(e.target.checked)}
-                  className="h-4 w-4"
-                />
-                Finale PDF automatisch herunterladen (nur wenn Guardrails OK)
-              </label>
-
-              <label className="flex items-center justify-between gap-3 text-sm text-gray-700">
-                <span>Parallelität (gleichzeitig verarbeiten)</span>
-                <select
-                  value={parallelism}
-                  onChange={(e) => setParallelism(Number(e.target.value))}
-                  disabled={isBatchRunning}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
-                >
-                  <option value={1}>1 (stabil)</option>
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
-                  <option value={4}>4 (schnell)</option>
-                </select>
-              </label>
-              <input
-                type="file"
-                accept="video/mp4"
-                multiple
-                onChange={(e) => addFiles(e.target.files)}
-                className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100"
-              />
-
-              <div className="flex gap-3">
-                <button
-                  onClick={runBatch}
-                  disabled={items.length === 0 || isBatchRunning}
-                  className="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                >
-                  {isBatchRunning ? 'Batch läuft…' : 'Batch verarbeiten'}
-                </button>
-                <button
-                  onClick={generateSeries}
-                  disabled={doneItems.length === 0 || isBatchRunning || isSeriesRunning || uploadingCount > 0}
-                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                >
-                  {isSeriesRunning ? 'Serie wird gebaut…' : 'Serie generieren'}
-                </button>
-                <button
-                  onClick={() => setItems([])}
-                  disabled={items.length === 0 || isBatchRunning}
-                  className="px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                >
-                  Liste leeren
-                </button>
               </div>
 
-              <div className="text-sm text-gray-600">
-                Hinweis: Server benötigt <span className="font-semibold">ffmpeg</span> und <span className="font-semibold">OPENAI_API_KEY</span>.
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-semibold mb-1 text-gray-800">2) Kapitel pro Video</h2>
-            <p className="text-sm text-gray-600 mb-4">Nach der Verarbeitung hat jedes Video ein Kapitel im Lernlayout.</p>
-            <div className="max-h-96 overflow-y-auto space-y-3">
-              {items.length === 0 ? (
-                <p className="text-gray-500 italic">Noch keine Dateien ausgewählt.</p>
-              ) : (
-                items.map((item) => (
-                  <div key={item.id} className="p-3 bg-gray-50 rounded-lg">
-                    <div className="flex justify-between items-start gap-3">
-                      <div className="min-w-0">
-                        <div className="font-medium text-gray-800 truncate">[{item.videoId}] {item.chapterTitle || item.file.name}</div>
-                        <div className="text-xs text-gray-500">{Math.round(item.file.size / 1024 / 1024 * 10) / 10} MB</div>
-                      </div>
-                      <div className="shrink-0">
-                        <span
-                          className={`text-xs px-2 py-1 rounded ${
-                            item.status === 'queued'
-                              ? 'bg-gray-200 text-gray-700'
-                              : item.status === 'uploading'
-                                ? 'bg-indigo-100 text-indigo-700'
-                                : item.status === 'done'
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-red-100 text-red-700'
-                          }`}
-                        >
-                          {item.status}
-                        </span>
-                      </div>
-                    </div>
-                    {item.status === 'uploading' && (
-                      <div className="mt-2 text-xs text-indigo-700">Transkribieren & Kapitel erstellen…</div>
-                    )}
-                    {item.error && <div className="mt-2 text-sm text-red-700">{item.error}</div>}
-                    {item.status === 'done' && (
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          onClick={() => exportText(`${item.file.name}.transcript.txt`, item.transcript || '')}
-                          className="px-3 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
-                          Export Transcript
-                        </button>
-                        <button
-                          onClick={() => exportText(`${item.file.name}.chapter.md`, item.chapterMarkdown || item.summary || '')}
-                          className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
-                          Export Kapitel
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 bg-white rounded-lg shadow-lg p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-semibold text-gray-800">3) Serien-Ausgabe</h2>
-            <div className="space-x-3">
-              <button
-                onClick={generateCombinedLetter}
-                disabled={doneItems.length === 0}
-                className="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  addFiles(e.dataTransfer.files);
+                }}
+                className={cx(
+                  'relative rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors',
+                  isDragging ? 'border-accent bg-accent-soft' : 'border-line hover:border-accent/50 hover:bg-surface-muted/60',
+                )}
               >
-                Lokal zusammenfügen
-              </button>
-              <button
-                onClick={generateSeries}
-                disabled={doneItems.length === 0 || isSeriesRunning}
-                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-              >
-                {isSeriesRunning ? 'Server baut…' : 'Server-Output + Guardrails'}
-              </button>
-              {seriesMarkdown && (
-                <button
-                  onClick={() => exportText(`series-${new Date().toISOString().split('T')[0]}.md`, seriesMarkdown)}
-                  className="px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
-                >
-                  Export Serie
-                </button>
-              )}
-              {seriesMarkdown && (
-                <button
-                  onClick={() => exportPdf(seriesMarkdown, seriesTitle)}
-                  className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-lg font-medium transition-colors"
-                >
-                  Export PDF
-                </button>
-              )}
-              {guardrailReport && (
-                <button
-                  onClick={() => exportText(`series-guardrails-${new Date().toISOString().split('T')[0]}.json`, JSON.stringify(guardrailReport, null, 2))}
-                  className="px-6 py-3 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors"
-                >
-                  Export Guardrails
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 mb-3">
-            <button
-              onClick={() => setActiveOutput('series')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                activeOutput === 'series' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-              }`}
-            >
-              Serie (Markdown)
-            </button>
-            <button
-              onClick={() => setActiveOutput('guardrails')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                activeOutput === 'guardrails' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-              }`}
-            >
-              Guardrails (JSON)
-            </button>
-            <button
-              onClick={() => setActiveOutput('local')}
-              className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                activeOutput === 'local' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-              }`}
-            >
-              Lokal (Fallback)
-            </button>
-          </div>
-
-          {activeOutput === 'series' && (
-            <div>
-              {guardrailReport && Array.isArray(guardrailReport?.missingIds) && (
-                <div
-                  className={`mb-3 rounded-lg px-3 py-2 text-sm ${
-                    guardrailReport.missingIds.length === 0
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-900 border border-amber-200'
-                  }`}
-                >
-                  {guardrailReport.missingIds.length === 0
-                    ? 'Guardrails OK: alle Videos wurden berücksichtigt.'
-                    : `Achtung: Es fehlen Videos in der Serie: ${guardrailReport.missingIds.join(', ')}`}
+                <div className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-full bg-accent-soft text-accent">
+                  <Icon.Upload className="h-5 w-5" />
                 </div>
+                <p className="text-sm font-medium">{t.dropHere}</p>
+                <p className="mt-1 text-xs text-muted">{t.or}</p>
+                <Button size="sm" className="mt-2" onClick={() => fileInputRef.current?.click()}>
+                  {t.chooseFiles}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  data-testid="file-input"
+                  type="file"
+                  accept="video/mp4"
+                  multiple
+                  aria-label={t.chooseFilesAria}
+                  onChange={(e) => {
+                    addFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                  className="sr-only"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button variant="primary" className="sm:flex-1" onClick={() => void runBatch()} disabled={items.length === 0 || isBatchRunning}>
+                  <Icon.Play />
+                  {isBatchRunning ? t.batchRunning : t.runBatch}
+                </Button>
+                <Button onClick={() => void generateSeries()} disabled={doneItems.length === 0 || isBatchRunning || isSeriesRunning || uploadingCount > 0}>
+                  <Icon.Sparkles />
+                  {isSeriesRunning ? t.seriesRunning : t.generateSeries}
+                </Button>
+              </div>
+
+              <details className="group rounded-xl border border-line px-4 open:pb-2">
+                <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                  {t.automation}
+                  <span className="text-muted transition-transform group-open:rotate-180">⌄</span>
+                </summary>
+                <div className="divide-y divide-line">
+                  <Toggle label={t.autoStartLabel} hint={t.autoStartHint} checked={autoStartBatch} onChange={setAutoStartBatch} disabled={isBatchRunning} />
+                  <Toggle label={t.autoSeriesLabel} hint={t.autoSeriesHint} checked={autoGenerateSeries} onChange={setAutoGenerateSeries} />
+                  <Toggle label={t.autoMarkdownLabel} hint={t.onlyIfGuardrailsOk} checked={autoDownloadSeries} onChange={setAutoDownloadSeries} />
+                  <Toggle label={t.autoPdfLabel} hint={t.onlyIfGuardrailsOk} checked={autoDownloadPdf} onChange={setAutoDownloadPdf} />
+                  <div className="flex items-center justify-between gap-4 py-2.5">
+                    <span>
+                      <span className="block text-sm font-medium">{t.parallelism}</span>
+                      <span className="block text-xs text-muted">{t.parallelismHint}</span>
+                    </span>
+                    <Segmented
+                      label={t.parallelism}
+                      value={parallelism}
+                      onChange={setParallelism}
+                      disabled={isBatchRunning}
+                      options={[1, 2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
+                    />
+                  </div>
+                </div>
+              </details>
+
+              <p className="flex items-start gap-2 text-xs text-muted">
+                <Icon.Alert className="mt-px h-3.5 w-3.5" />
+                <span>
+                  {t.serverNeedsPrefix} <code className="font-mono">ffmpeg</code> {t.and} <code className="font-mono">OPENAI_API_KEY</code>.
+                </span>
+              </p>
+            </div>
+          </Card>
+
+          {/* ---------- 2) Chapters ---------- */}
+          <Card className="flex flex-col lg:col-span-3">
+            <CardHeader
+              step={2}
+              title={t.chaptersTitle}
+              description={t.chaptersDescription}
+              actions={
+                items.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearAll} disabled={isBatchRunning}>
+                    <Icon.Trash /> {t.clearList}
+                  </Button>
+                )
+              }
+            />
+            <div className="flex-1 p-3 sm:p-4">
+              {items.length === 0 ? (
+                <div className="grid h-full min-h-60 place-items-center rounded-xl border border-dashed border-line text-center">
+                  <div className="px-6">
+                    <Icon.Video className="mx-auto mb-3 h-6 w-6 text-muted" />
+                    <p className="text-sm font-medium">{t.noVideos}</p>
+                    <p className="mt-1 text-xs text-muted">{t.noVideosHint}</p>
+                  </div>
+                </div>
+              ) : (
+                <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label={t.videosList} tabIndex={0}>
+                  {items.map((item) => (
+                    <li key={item.id} data-testid="lecture-item" className="rounded-xl border border-line bg-surface p-3.5 sm:p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="mt-0.5 rounded-md bg-surface-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted">{item.videoId}</span>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{item.chapterTitle || item.file.name}</div>
+                            <div className="mt-0.5 truncate text-xs text-muted">
+                              {item.chapterTitle ? `${item.file.name} · ` : ''}
+                              {Math.round((item.file.size / 1024 / 1024) * 10) / 10} MB
+                            </div>
+                          </div>
+                        </div>
+                        <StatusPill status={item.status} label={t.status[item.status]} />
+                      </div>
+                      {item.status === 'uploading' && (
+                        <div className="mt-3">
+                          <div className="shimmer relative h-1 overflow-hidden rounded-full bg-accent-soft" />
+                          <p className="mt-1.5 text-xs text-muted">{t.processing}</p>
+                        </div>
+                      )}
+                      {item.error && <p className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">{item.error}</p>}
+                      {item.status === 'done' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button size="sm" onClick={() => exportText(`${item.file.name}.transcript.txt`, item.transcript || '')}>
+                            <Icon.File /> {t.transcript}
+                          </Button>
+                          <Button size="sm" onClick={() => exportText(`${item.file.name}.chapter.md`, item.chapterMarkdown || item.summary || '')}>
+                            <Icon.Download /> {t.chapter}
+                          </Button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
+            </div>
+          </Card>
+        </div>
+
+        {/* ---------- 3) Series output ---------- */}
+        <Card className="mt-6">
+          <CardHeader
+            step={3}
+            title={t.outputTitle}
+            description={t.outputDescription}
+            actions={
+              <>
+                <Button size="sm" onClick={generateCombinedLetter} disabled={doneItems.length === 0}>
+                  <Icon.Layers /> {t.mergeLocally}
+                </Button>
+                {seriesMarkdown && (
+                  <>
+                    <Button size="sm" onClick={() => exportText(`series-${today()}.md`, seriesMarkdown)}>
+                      <Icon.Download /> Markdown
+                    </Button>
+                    <Button size="sm" variant="primary" onClick={() => void exportPdf(seriesMarkdown, seriesTitle)}>
+                      <Icon.Download /> PDF
+                    </Button>
+                  </>
+                )}
+                {guardrailReport && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => exportText(`series-guardrails-${today()}.json`, JSON.stringify(guardrailReport, null, 2))}
+                  >
+                    <Icon.Shield /> {t.report}
+                  </Button>
+                )}
+              </>
+            }
+          />
+
+          <div className="p-5 sm:p-6">
+            <div role="tablist" aria-label={t.outputTabs} className="mb-4 flex gap-0.5 border-b border-line sm:gap-1">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  role="tab"
+                  type="button"
+                  aria-selected={activeOutput === t.id}
+                  onClick={() => setActiveOutput(t.id)}
+                  className={cx(
+                    '-mb-px whitespace-nowrap border-b-2 px-2 pb-2.5 text-[13px] font-medium sm:px-3 sm:text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+                    activeOutput === t.id ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground',
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {seriesError && (
+              <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">
+                <Icon.Alert className="mt-0.5" /> {seriesError}
+              </div>
+            )}
+
+            {missingIds && (activeOutput === 'preview' || activeOutput === 'markdown') && (
+              <div
+                role="status"
+                data-testid="guardrail-banner"
+                className={cx(
+                  'mb-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm',
+                  missingIds.length === 0 ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning',
+                )}
+              >
+                {missingIds.length === 0 ? <Icon.Shield className="mt-0.5" /> : <Icon.Alert className="mt-0.5" />}
+                {missingIds.length === 0
+                  ? t.guardrailsOk
+                  : t.guardrailsMissing(missingIds.join(', '))}
+              </div>
+            )}
+
+            {activeOutput === 'preview' &&
+              (seriesMarkdown ? (
+                <article
+                  data-testid="series-preview"
+                  tabIndex={0}
+                  aria-label={t.seriesPreviewLabel}
+                  className="prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{toPreviewMarkdown(seriesMarkdown)}</ReactMarkdown>
+                </article>
+              ) : (
+                <EmptyOutput busy={isSeriesRunning} t={t} />
+              ))}
+
+            {activeOutput === 'markdown' && (
               <textarea
+                aria-label={t.markdownAria}
                 value={seriesMarkdown}
                 onChange={(e) => setSeriesMarkdown(e.target.value)}
-                className="w-full h-[28rem] p-4 border border-gray-300 rounded-lg font-mono text-sm"
-                placeholder="Hier erscheint die serverseitig sortierte Serie inkl. Evidence/Guardrails..."
+                className="h-[28rem] w-full rounded-xl border border-line bg-surface p-4 font-mono text-[13px] leading-relaxed focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                placeholder={t.markdownPlaceholder}
               />
-            </div>
-          )}
+            )}
 
-          {activeOutput === 'guardrails' && (
-            <div>
-              <textarea
-                value={guardrailReport ? JSON.stringify(guardrailReport, null, 2) : ''}
-                readOnly
-                className="w-full h-[28rem] p-4 border border-gray-300 rounded-lg font-mono text-sm bg-gray-50"
-                placeholder="Guardrail-Report (JSON) erscheint hier..."
-              />
-            </div>
-          )}
+            {activeOutput === 'guardrails' && (
+              <pre
+                data-testid="guardrail-json"
+                tabIndex={0}
+                className="h-[28rem] overflow-auto rounded-xl border border-line bg-surface-muted p-4 font-mono text-[13px] leading-relaxed"
+              >
+                {guardrailReport ? JSON.stringify(guardrailReport, null, 2) : t.guardrailsEmpty}
+              </pre>
+            )}
 
-          {activeOutput === 'local' && (
-            <div>
-              {combinedLetter ? (
+            {activeOutput === 'local' &&
+              (combinedLetter ? (
                 <textarea
+                  aria-label={t.localAria}
                   value={combinedLetter}
                   onChange={(e) => setCombinedLetter(e.target.value)}
-                  className="w-full h-[28rem] p-4 border border-gray-300 rounded-lg font-mono text-sm"
-                  placeholder="Lokale Zusammenfügung erscheint hier..."
+                  className="h-[28rem] w-full rounded-xl border border-line bg-surface p-4 font-mono text-[13px] leading-relaxed focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 />
               ) : (
-                <div className="h-[28rem] p-4 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center">
-                  <p className="text-gray-500 italic">Optional: lokal zusammenfügen (ohne Sortierung/Guardrails).</p>
+                <div className="grid h-60 place-items-center rounded-xl border border-dashed border-line px-6 text-center text-sm text-muted">
+                  {t.localEmpty}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
+              ))}
+          </div>
+        </Card>
+
+        <footer className="mt-10 text-center text-xs text-muted">
+          {t.footer}
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function EmptyOutput({ busy, t }: { busy: boolean; t: Messages }) {
+  return (
+    <div className="grid h-60 place-items-center rounded-xl border border-dashed border-line px-6 text-center">
+      <div>
+        <Icon.Sparkles className={cx('mx-auto mb-3 h-6 w-6', busy ? 'animate-pulse text-accent' : 'text-muted')} />
+        <p className="text-sm font-medium">{busy ? t.seriesRunning : t.emptySeries}</p>
+        <p className="mt-1 text-xs text-muted">
+          {busy ? t.buildingHint : t.emptySeriesHint}
+        </p>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ export function sha256Hex(data: Buffer | string) {
 }
 
 export function getCacheDir() {
-  return process.env.CACHE_DIR || path.join(process.cwd(), '.cache', 'lecture-notes-app');
+  return process.env.CACHE_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), '.cache', 'lecture-notes-app');
 }
 
 async function ensureDir(dir: string) {
