@@ -226,19 +226,18 @@ export function Segmented<T extends string | number>({
 
 export type FileStatus = 'queued' | 'uploading' | 'done' | 'error';
 
-const statusMeta: Record<FileStatus, { label: string; className: string }> = {
-  queued: { label: 'Wartet', className: 'bg-surface-muted text-muted' },
-  uploading: { label: 'In Arbeit', className: 'bg-accent-soft text-accent' },
-  done: { label: 'Fertig', className: 'bg-success-soft text-success' },
-  error: { label: 'Fehler', className: 'bg-danger-soft text-danger' },
+const statusClass: Record<FileStatus, string> = {
+  queued: 'bg-surface-muted text-muted',
+  uploading: 'bg-accent-soft text-accent',
+  done: 'bg-success-soft text-success',
+  error: 'bg-danger-soft text-danger',
 };
 
-export function StatusPill({ status }: { status: FileStatus }) {
-  const m = statusMeta[status];
+export function StatusPill({ status, label }: { status: FileStatus; label: string }) {
   return (
-    <span className={cx('inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium', m.className)}>
+    <span className={cx('inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium', statusClass[status])}>
       <span className={cx('h-1.5 w-1.5 rounded-full bg-current', status === 'uploading' && 'animate-pulse')} />
-      {m.label}
+      {label}
     </span>
   );
 }
