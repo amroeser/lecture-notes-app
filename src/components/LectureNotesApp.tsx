@@ -1,17 +1,26 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { AppHeader } from './AppHeader';
 import { Button, Card, CardHeader, Icon, Segmented, Stat, StatusPill, Toggle, cx, type FileStatus } from './ui';
 import { useLocale } from '@/i18n/useLocale';
-import { locales, type Locale, type Messages } from '@/i18n/messages';
+import type { Messages } from '@/i18n/messages';
+import { isNotFound, library } from '@/lib/library/client';
+import { MAX_TITLE_LENGTH, formatVideoId, videoNumber, type Course, type GuardrailReport, type StoredLecture } from '@/lib/library/types';
 
 interface ProcessedLecture {
   id: string;
   videoId: string;
-  file: File;
+  /** Present only for files picked in this session; stored lectures have no File. */
+  file?: File;
+  fileName: string;
+  sizeBytes: number;
   status: FileStatus;
+  /** True once the result is in the course library. */
+  persisted: boolean;
   error?: string;
   transcript?: string;
   summary?: string;
@@ -19,14 +28,8 @@ interface ProcessedLecture {
   chapterMarkdown?: string;
 }
 
-interface GuardrailReport {
-  missingIds?: string[];
-  inputCount?: number;
-  order?: string[];
-  [key: string]: unknown;
-}
-
 type OutputTab = 'preview' | 'markdown' | 'guardrails' | 'local';
+type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
 
 const today = () => new Date().toISOString().split('T')[0];
 
@@ -52,14 +55,47 @@ function toPreviewMarkdown(md: string) {
   return md.replace(/<!--VID:V\d+-->/g, '').replace(/<div class="page-break"><\/div>/g, '\n---\n');
 }
 
-export default function LectureNotesApp() {
-  const { locale, t, setLocale } = useLocale();
+function fromStored(l: StoredLecture): ProcessedLecture {
+  return {
+    id: `stored-${l.videoId}`,
+    videoId: l.videoId,
+    fileName: l.fileName,
+    sizeBytes: l.sizeBytes,
+    status: l.status,
+    persisted: true,
+    error: l.error,
+    transcript: l.transcript,
+    summary: l.chapterMarkdown,
+    chapterTitle: l.chapterTitle,
+    chapterMarkdown: l.chapterMarkdown,
+  };
+}
+
+function toStored(i: ProcessedLecture): Omit<StoredLecture, 'updatedAt'> {
+  return {
+    videoId: i.videoId,
+    fileName: i.fileName,
+    sizeBytes: i.sizeBytes,
+    status: i.status === 'done' ? 'done' : 'error',
+    chapterTitle: i.chapterTitle,
+    chapterMarkdown: i.chapterMarkdown,
+    transcript: i.transcript,
+    error: i.error,
+  };
+}
+
+export default function LectureNotesApp({ courseId }: { courseId: string }) {
+  const { locale, t } = useLocale();
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [loadError, setLoadError] = useState('');
   const [items, setItems] = useState<ProcessedLecture[]>([]);
   const [combinedLetter, setCombinedLetter] = useState('');
   const [isBatchRunning, setIsBatchRunning] = useState(false);
-  const [seriesTitle, setSeriesTitle] = useState('');
+  const [courseTitle, setCourseTitle] = useState('');
+  const [titleDraft, setTitleDraft] = useState('');
   const [seriesMarkdown, setSeriesMarkdown] = useState('');
   const [seriesError, setSeriesError] = useState('');
+  const [saveError, setSaveError] = useState('');
   const [guardrailReport, setGuardrailReport] = useState<GuardrailReport | null>(null);
   const [isSeriesRunning, setIsSeriesRunning] = useState(false);
   const [autoGenerateSeries, setAutoGenerateSeries] = useState(true);
@@ -73,18 +109,74 @@ export default function LectureNotesApp() {
   // Source of truth for async workers; state mirrors it for rendering.
   const itemsRef = useRef<ProcessedLecture[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Markdown as last saved, so blur only writes real edits.
+  const savedSeriesRef = useRef('');
 
   const updateItems = (fn: (prev: ProcessedLecture[]) => ProcessedLecture[]) => {
     itemsRef.current = fn(itemsRef.current);
     setItems(itemsRef.current);
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    library
+      .get(courseId)
+      .then((course: Course) => {
+        if (cancelled) return;
+        itemsRef.current = course.lectures.map(fromStored);
+        setItems(itemsRef.current);
+        setCourseTitle(course.title);
+        setTitleDraft(course.title);
+        setSeriesMarkdown(course.seriesMarkdown);
+        savedSeriesRef.current = course.seriesMarkdown;
+        setGuardrailReport(course.guardrailReport);
+        setLoadState('ready');
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        if (isNotFound(e) || (e as { status?: number })?.status === 400) {
+          setLoadState('notfound');
+        } else {
+          setLoadError(e instanceof Error ? e.message : String(e));
+          setLoadState('error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId]);
+
   const doneItems = useMemo(() => items.filter((i) => i.status === 'done'), [items]);
   const queuedCount = items.filter((i) => i.status === 'queued').length;
   const uploadingCount = items.filter((i) => i.status === 'uploading').length;
   const errorCount = items.filter((i) => i.status === 'error').length;
+  const clearableCount = items.filter((i) => i.status === 'queued' || (i.status === 'error' && !i.persisted)).length;
   const progress = items.length === 0 ? 0 : Math.round(((doneItems.length + errorCount) / items.length) * 100);
   const missingIds = Array.isArray(guardrailReport?.missingIds) ? guardrailReport.missingIds : null;
+
+  const persist = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      setSaveError('');
+      return true;
+    } catch (e) {
+      setSaveError(t.saveError(errorMessage(e, t.unknownError)));
+      return false;
+    }
+  };
+
+  const persistSeries = async (md: string, report: GuardrailReport | null) => {
+    if (await persist(() => library.saveSeries(courseId, md, report))) savedSeriesRef.current = md;
+  };
+
+  const saveTitle = async () => {
+    const title = titleDraft.replace(/\s+/g, ' ').trim();
+    if (!title || title === courseTitle) {
+      setTitleDraft(courseTitle);
+      return;
+    }
+    if (await persist(() => library.rename(courseId, title))) setCourseTitle(title);
+  };
 
   const exportPdf = async (md: string, title: string) => {
     if (!md.trim()) return;
@@ -113,7 +205,7 @@ export default function LectureNotesApp() {
         .filter((i) => i.status === 'done')
         .map((i) => ({
           videoId: i.videoId,
-          fileName: i.file.name,
+          fileName: i.fileName,
           transcriptText: i.transcript,
           chapterTitle: i.chapterTitle,
           chapterMarkdown: i.chapterMarkdown || i.summary || '',
@@ -123,7 +215,7 @@ export default function LectureNotesApp() {
       const res = await fetch('/api/series-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seriesTitle, chapters }),
+        body: JSON.stringify({ seriesTitle: courseTitle, chapters }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || `Request failed (${res.status})`);
@@ -133,23 +225,25 @@ export default function LectureNotesApp() {
       setSeriesMarkdown(md);
       setGuardrailReport(report);
       setActiveOutput('preview');
+      await persistSeries(md, report);
 
       const ok = md && Array.isArray(report?.missingIds) && report.missingIds.length === 0;
       if (ok && autoDownloadSeries) exportText(`series-${today()}.md`, md);
-      if (ok && autoDownloadPdf) await exportPdf(md, seriesTitle);
+      if (ok && autoDownloadPdf) await exportPdf(md, courseTitle);
     } catch (e) {
       setSeriesError(t.seriesError(errorMessage(e, t.unknownError)));
-      setGuardrailReport(null);
     } finally {
       setIsSeriesRunning(false);
     }
   };
 
   const processOne = async (item: ProcessedLecture) => {
+    const file = item.file;
+    if (!file) return;
     updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'uploading', error: undefined } : p)));
     try {
       const fd = new FormData();
-      fd.append('file', item.file);
+      fd.append('file', file);
       const res = await fetch('/api/process-lecture', { method: 'POST', body: fd });
       const json = await res.json();
       if (!res.ok) {
@@ -174,6 +268,12 @@ export default function LectureNotesApp() {
     } catch (e) {
       updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'error', error: errorMessage(e, t.unknownError) } : p)));
     }
+    const result = itemsRef.current.find((p) => p.id === item.id);
+    if (result && (result.status === 'done' || result.status === 'error')) {
+      if (await persist(() => library.saveLecture(courseId, toStored(result)))) {
+        updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, persisted: true } : p)));
+      }
+    }
   };
 
   const runBatch = async () => {
@@ -181,11 +281,14 @@ export default function LectureNotesApp() {
     setIsBatchRunning(true);
     try {
       // Failed items are retried once per batch; files added while the batch runs are picked up too.
-      const retry = new Set(itemsRef.current.filter((i) => i.status === 'error').map((i) => i.id));
+      // Stored lectures without a File cannot be re-sent; they need a fresh upload.
+      const retry = new Set(itemsRef.current.filter((i) => i.status === 'error' && i.file).map((i) => i.id));
       const claimed = new Set<string>();
       const next = () =>
-        itemsRef.current.find((i) => !claimed.has(i.id) && (i.status === 'queued' || (i.status === 'error' && retry.has(i.id))));
-      const pending = itemsRef.current.filter((i) => i.status === 'queued' || i.status === 'error').length;
+        itemsRef.current.find(
+          (i) => i.file && !claimed.has(i.id) && (i.status === 'queued' || (i.status === 'error' && retry.has(i.id))),
+        );
+      const pending = itemsRef.current.filter((i) => i.file && (i.status === 'queued' || i.status === 'error')).length;
       const maxWorkers = Math.max(1, Math.min(6, Number(parallelism) || 1));
       const worker = async () => {
         for (let item = next(); item; item = next()) {
@@ -208,12 +311,29 @@ export default function LectureNotesApp() {
     if (mp4s.length === 0) return;
 
     updateItems((prev) => {
-      const existingIds = new Set(prev.map((p) => p.id));
-      const fresh = mp4s
-        .map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}`, file }))
-        .filter((n) => !existingIds.has(n.id))
-        .map((n) => ({ ...n, status: 'queued' as const, videoId: '' }));
-      return [...prev, ...fresh].map((it, idx) => ({ ...it, videoId: `V${String(idx + 1).padStart(2, '0')}` }));
+      const next = [...prev];
+      let maxNumber = next.reduce((m, i) => Math.max(m, videoNumber(i.videoId)), 0);
+      for (const file of mp4s) {
+        // A stored lecture that failed earlier is picked up again when the same file is re-uploaded.
+        const failed = next.findIndex((i) => i.status === 'error' && !i.file && i.fileName === file.name);
+        if (failed >= 0) {
+          next[failed] = { ...next[failed], file, sizeBytes: file.size, status: 'queued', error: undefined };
+          continue;
+        }
+        const duplicate = next.some((i) => i.fileName === file.name && i.sizeBytes === file.size && i.status !== 'error');
+        if (duplicate) continue;
+        maxNumber += 1;
+        next.push({
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          videoId: formatVideoId(maxNumber),
+          file,
+          fileName: file.name,
+          sizeBytes: file.size,
+          status: 'queued',
+          persisted: false,
+        });
+      }
+      return next;
     });
 
     if (autoStartBatch && !isBatchRunning) void runBatch();
@@ -223,14 +343,14 @@ export default function LectureNotesApp() {
     const joined = doneItems
       .map((i) => {
         const s = (i.chapterMarkdown || i.summary || '').trim();
-        return `# ${i.chapterTitle || i.file.name} <!--VID:${i.videoId}-->\n\n${s || t.noSummary}\n`;
+        return `# ${i.chapterTitle || i.fileName} <!--VID:${i.videoId}-->\n\n${s || t.noSummary}\n`;
       })
       .join('\n');
     setCombinedLetter(`${t.localDocTitle}\n${t.localDocDate}: ${new Date().toLocaleDateString(locale)}\n\n${joined}`.trim());
     setActiveOutput('local');
   };
 
-  const clearAll = () => updateItems(() => []);
+  const clearQueue = () => updateItems((prev) => prev.filter((i) => !(i.status === 'queued' || (i.status === 'error' && !i.persisted))));
 
   const tabs: Array<{ id: OutputTab; label: string }> = [
     { id: 'preview', label: t.tabPreview },
@@ -239,36 +359,20 @@ export default function LectureNotesApp() {
     { id: 'local', label: t.tabLocal },
   ];
 
+  if (loadState !== 'ready') {
+    return <CourseFallback state={loadState} error={loadError} t={t} />;
+  }
+
   return (
     <div className="app-backdrop min-h-screen">
-      <div className="mx-auto max-w-6xl px-4 pb-16 pt-8 sm:px-6 lg:pt-12">
-        {/* ---------- Header ---------- */}
-        <header className="mb-8 flex flex-col gap-6 sm:mb-10 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-line bg-surface/70 px-3 py-1 text-xs font-medium text-muted backdrop-blur">
-              <span className="h-1.5 w-1.5 rounded-full bg-success" />
-              OpenAI · Voxtral · PDF
-            </div>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Lecture Batch Summarizer</h1>
-            <p className="mt-2 max-w-xl text-pretty text-muted">
-              {t.tagline}
-            </p>
+      <div className="mx-auto max-w-6xl px-4 pb-16 pt-6 sm:px-6 lg:pt-8">
+        <AppHeader back title={courseTitle} description={t.tagline} />
+
+        {saveError && (
+          <div role="alert" data-testid="save-error" className="mb-6 flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">
+            <Icon.Alert className="mt-0.5" /> {saveError}
           </div>
-          <div className="flex items-center gap-4 self-start sm:self-auto">
-            <Segmented<Locale>
-              label={t.languageLabel}
-              value={locale}
-              onChange={setLocale}
-              options={locales.map((l) => ({ value: l, label: l.toUpperCase() }))}
-            />
-            <a
-              href="https://github.com/amroeser/lecture-notes-app"
-              className="inline-flex items-center gap-2 text-sm text-muted transition-colors hover:text-foreground"
-            >
-              <Icon.Github /> GitHub
-            </a>
-          </div>
-        </header>
+        )}
 
         {/* ---------- Stats ---------- */}
         <Card className="mb-6 px-5 py-4 sm:px-6" aria-label={t.statusRegion}>
@@ -286,7 +390,7 @@ export default function LectureNotesApp() {
             aria-valuemin={0}
             aria-valuemax={100}
           >
-            <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${progress}%` }} />
+            <div className="h-full w-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out" style={{ transform: `scaleX(${progress / 100})` }} />
           </div>
         </Card>
 
@@ -297,12 +401,17 @@ export default function LectureNotesApp() {
             <div className="space-y-5 p-5 sm:p-6">
               <div>
                 <label htmlFor="series-title" className="mb-1.5 block text-sm font-medium">
-                  {t.seriesTitleLabel} <span className="font-normal text-muted">{t.optional}</span>
+                  {t.seriesTitleLabel}
                 </label>
                 <input
                   id="series-title"
-                  value={seriesTitle}
-                  onChange={(e) => setSeriesTitle(e.target.value)}
+                  maxLength={MAX_TITLE_LENGTH}
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={() => void saveTitle()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
                   placeholder={t.seriesTitlePlaceholder}
                   className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 />
@@ -348,7 +457,12 @@ export default function LectureNotesApp() {
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Button variant="primary" className="sm:flex-1" onClick={() => void runBatch()} disabled={items.length === 0 || isBatchRunning}>
+                <Button
+                  variant="primary"
+                  className="sm:flex-1"
+                  onClick={() => void runBatch()}
+                  disabled={!items.some((i) => i.file && (i.status === 'queued' || i.status === 'error')) || isBatchRunning}
+                >
                   <Icon.Play />
                   {isBatchRunning ? t.batchRunning : t.runBatch}
                 </Button>
@@ -361,7 +475,7 @@ export default function LectureNotesApp() {
               <details className="group rounded-xl border border-line px-4 open:pb-2">
                 <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
                   {t.automation}
-                  <span className="text-muted transition-transform group-open:rotate-180">⌄</span>
+                  <span className="text-muted transition-transform duration-200 ease-out group-open:rotate-180">⌄</span>
                 </summary>
                 <div className="divide-y divide-line">
                   <Toggle label={t.autoStartLabel} hint={t.autoStartHint} checked={autoStartBatch} onChange={setAutoStartBatch} disabled={isBatchRunning} />
@@ -400,8 +514,8 @@ export default function LectureNotesApp() {
               title={t.chaptersTitle}
               description={t.chaptersDescription}
               actions={
-                items.length > 0 && (
-                  <Button variant="ghost" size="sm" onClick={clearAll} disabled={isBatchRunning}>
+                clearableCount > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearQueue} disabled={isBatchRunning}>
                     <Icon.Trash /> {t.clearList}
                   </Button>
                 )
@@ -419,15 +533,15 @@ export default function LectureNotesApp() {
               ) : (
                 <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label={t.videosList} tabIndex={0}>
                   {items.map((item) => (
-                    <li key={item.id} data-testid="lecture-item" className="rounded-xl border border-line bg-surface p-3.5 sm:p-4">
+                    <li key={item.id} data-testid="lecture-item" className="enter rounded-xl border border-line bg-surface p-3.5 sm:p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 items-start gap-3">
                           <span className="mt-0.5 rounded-md bg-surface-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted">{item.videoId}</span>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{item.chapterTitle || item.file.name}</div>
+                            <div className="truncate text-sm font-medium">{item.chapterTitle || item.fileName}</div>
                             <div className="mt-0.5 truncate text-xs text-muted">
-                              {item.chapterTitle ? `${item.file.name} · ` : ''}
-                              {Math.round((item.file.size / 1024 / 1024) * 10) / 10} MB
+                              {item.chapterTitle ? `${item.fileName} · ` : ''}
+                              {Math.round((item.sizeBytes / 1024 / 1024) * 10) / 10} MB
                             </div>
                           </div>
                         </div>
@@ -440,12 +554,13 @@ export default function LectureNotesApp() {
                         </div>
                       )}
                       {item.error && <p className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">{item.error}</p>}
+                      {item.status === 'error' && !item.file && <p className="mt-1.5 text-xs text-muted">{t.reuploadHint}</p>}
                       {item.status === 'done' && (
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <Button size="sm" onClick={() => exportText(`${item.file.name}.transcript.txt`, item.transcript || '')}>
+                          <Button size="sm" onClick={() => exportText(`${item.fileName}.transcript.txt`, item.transcript || '')}>
                             <Icon.File /> {t.transcript}
                           </Button>
-                          <Button size="sm" onClick={() => exportText(`${item.file.name}.chapter.md`, item.chapterMarkdown || item.summary || '')}>
+                          <Button size="sm" onClick={() => exportText(`${item.fileName}.chapter.md`, item.chapterMarkdown || item.summary || '')}>
                             <Icon.Download /> {t.chapter}
                           </Button>
                         </div>
@@ -474,7 +589,7 @@ export default function LectureNotesApp() {
                     <Button size="sm" onClick={() => exportText(`series-${today()}.md`, seriesMarkdown)}>
                       <Icon.Download /> Markdown
                     </Button>
-                    <Button size="sm" variant="primary" onClick={() => void exportPdf(seriesMarkdown, seriesTitle)}>
+                    <Button size="sm" variant="primary" onClick={() => void exportPdf(seriesMarkdown, courseTitle)}>
                       <Icon.Download /> PDF
                     </Button>
                   </>
@@ -494,19 +609,19 @@ export default function LectureNotesApp() {
 
           <div className="p-5 sm:p-6">
             <div role="tablist" aria-label={t.outputTabs} className="mb-4 flex gap-0.5 border-b border-line sm:gap-1">
-              {tabs.map((t) => (
+              {tabs.map((tab) => (
                 <button
-                  key={t.id}
+                  key={tab.id}
                   role="tab"
                   type="button"
-                  aria-selected={activeOutput === t.id}
-                  onClick={() => setActiveOutput(t.id)}
+                  aria-selected={activeOutput === tab.id}
+                  onClick={() => setActiveOutput(tab.id)}
                   className={cx(
                     '-mb-px whitespace-nowrap border-b-2 px-2 pb-2.5 text-[13px] font-medium sm:px-3 sm:text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-                    activeOutput === t.id ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground',
+                    activeOutput === tab.id ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground',
                   )}
                 >
-                  {t.label}
+                  {tab.label}
                 </button>
               ))}
             </div>
@@ -522,14 +637,12 @@ export default function LectureNotesApp() {
                 role="status"
                 data-testid="guardrail-banner"
                 className={cx(
-                  'mb-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm',
+                  'enter mb-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm',
                   missingIds.length === 0 ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning',
                 )}
               >
                 {missingIds.length === 0 ? <Icon.Shield className="mt-0.5" /> : <Icon.Alert className="mt-0.5" />}
-                {missingIds.length === 0
-                  ? t.guardrailsOk
-                  : t.guardrailsMissing(missingIds.join(', '))}
+                {missingIds.length === 0 ? t.guardrailsOk : t.guardrailsMissing(missingIds.join(', '))}
               </div>
             )}
 
@@ -539,7 +652,7 @@ export default function LectureNotesApp() {
                   data-testid="series-preview"
                   tabIndex={0}
                   aria-label={t.seriesPreviewLabel}
-                  className="prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
+                  className="enter prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{toPreviewMarkdown(seriesMarkdown)}</ReactMarkdown>
                 </article>
@@ -552,6 +665,9 @@ export default function LectureNotesApp() {
                 aria-label={t.markdownAria}
                 value={seriesMarkdown}
                 onChange={(e) => setSeriesMarkdown(e.target.value)}
+                onBlur={() => {
+                  if (seriesMarkdown !== savedSeriesRef.current) void persistSeries(seriesMarkdown, guardrailReport);
+                }}
                 className="h-[28rem] w-full rounded-xl border border-line bg-surface p-4 font-mono text-[13px] leading-relaxed focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 placeholder={t.markdownPlaceholder}
               />
@@ -583,9 +699,34 @@ export default function LectureNotesApp() {
           </div>
         </Card>
 
-        <footer className="mt-10 text-center text-xs text-muted">
-          {t.footer}
-        </footer>
+        <footer className="mt-10 text-center text-xs text-muted">{t.footer}</footer>
+      </div>
+    </div>
+  );
+}
+
+function CourseFallback({ state, error, t }: { state: Exclude<LoadState, 'ready'>; error: string; t: Messages }) {
+  return (
+    <div className="app-backdrop min-h-screen">
+      <div className="mx-auto max-w-6xl px-4 pb-16 pt-6 sm:px-6 lg:pt-8">
+        <AppHeader back title={state === 'loading' ? t.loading : state === 'notfound' ? t.courseNotFound : t.libraryError(error)} />
+        {state === 'loading' ? (
+          <div className="space-y-6" aria-busy="true">
+            <div className="h-28 animate-pulse rounded-2xl border border-line bg-surface" />
+            <div className="h-96 animate-pulse rounded-2xl border border-line bg-surface" />
+          </div>
+        ) : (
+          <Card className="px-6 py-12 text-center" data-testid="course-not-found">
+            <Icon.Alert className="mx-auto mb-3 h-6 w-6 text-muted" />
+            <p className="text-sm text-muted">{state === 'notfound' ? t.courseNotFoundHint : error}</p>
+            <Link
+              href="/"
+              className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-white hover:bg-accent-strong dark:text-zinc-950"
+            >
+              <Icon.ArrowLeft /> {t.backToLibrary}
+            </Link>
+          </Card>
+        )}
       </div>
     </div>
   );
@@ -597,9 +738,7 @@ function EmptyOutput({ busy, t }: { busy: boolean; t: Messages }) {
       <div>
         <Icon.Sparkles className={cx('mx-auto mb-3 h-6 w-6', busy ? 'animate-pulse text-accent' : 'text-muted')} />
         <p className="text-sm font-medium">{busy ? t.seriesRunning : t.emptySeries}</p>
-        <p className="mt-1 text-xs text-muted">
-          {busy ? t.buildingHint : t.emptySeriesHint}
-        </p>
+        <p className="mt-1 text-xs text-muted">{busy ? t.buildingHint : t.emptySeriesHint}</p>
       </div>
     </div>
   );

@@ -66,6 +66,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Motion tokens: strong custom curves (built-in CSS easings are too weak) */
+@theme {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
 /* Subtle backdrop: soft accent glow at the top of the page */
 .app-backdrop {
   background:
@@ -87,11 +93,66 @@ body {
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--accent) 35%, transparent), transparent);
-  animation: shimmer 1.4s ease-in-out infinite;
+  animation: shimmer 1.4s linear infinite;
 }
 
+/* Staggered entrance for lists that mount at once (course cards). Set --i per item. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.rise {
+  animation: rise 320ms var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 8) * 40ms);
+}
+
+/* Elements that appear later (new lectures, banners, preview): no jump into place */
+.enter {
+  transition:
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Modal: stays centred, never grows from nothing */
+dialog.dialog-pop[open] {
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Reduced motion: keep the fades that aid comprehension, drop movement */
 @media (prefers-reduced-motion: reduce) {
   .shimmer::after {
     animation: none;
+  }
+
+  .rise {
+    animation-name: fade;
+  }
+
+  .enter,
+  dialog.dialog-pop[open] {
+    @starting-style {
+      transform: none;
+    }
   }
 }

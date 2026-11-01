@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { fakeVideo, lectures, mockApi, seriesTitle } from './fixtures';
+import { fakeVideo, lectures, mockApi, openCourse, seriesTitle, settleAnimations } from './fixtures';
 
 const allVideos = () => lectures.map((l) => fakeVideo(l.file));
 
@@ -10,8 +10,10 @@ async function upload(page: Page, files = allVideos()) {
 
 test.describe('Lecture Batch Summarizer', () => {
   test('shows the empty state with disabled actions', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1, name: 'Lecture Batch Summarizer' })).toBeVisible();
+    const { title } = await openCourse(page);
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+    await expect(page.getByLabel('Kurstitel', { exact: true })).toHaveValue(title);
+    await expect(page.getByTestId('back-to-library')).toBeVisible();
     await expect(page.getByText('Noch keine Videos')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Batch verarbeiten' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Serie generieren' })).toBeDisabled();
@@ -20,8 +22,8 @@ test.describe('Lecture Batch Summarizer', () => {
 
   test('processes a batch end to end and auto-downloads Markdown and PDF', async ({ page }) => {
     await mockApi(page);
-    await page.goto('/');
-    await page.getByLabel('Serientitel').fill(seriesTitle);
+    // The course title doubles as the series title.
+    await openCourse(page, seriesTitle);
 
     const downloads: string[] = [];
     page.on('download', (d) => downloads.push(d.suggestedFilename()));
@@ -48,14 +50,14 @@ test.describe('Lecture Batch Summarizer', () => {
 
   test('ignores files that are not MP4', async ({ page }) => {
     await mockApi(page);
-    await page.goto('/');
+    await openCourse(page);
     await upload(page, [{ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('x') }]);
     await expect(page.getByText('Noch keine Videos')).toBeVisible();
   });
 
   test('shows a failed lecture and recovers on retry', async ({ page }) => {
     await mockApi(page, { failOnce: [lectures[1].file] });
-    await page.goto('/');
+    await openCourse(page);
     // Keep the series step manual so the retry is the only thing under test.
     await page.getByText('Automatik & Leistung').click();
     await page.getByRole('switch', { name: /Serie automatisch generieren/ }).uncheck({ force: true });
@@ -73,7 +75,7 @@ test.describe('Lecture Batch Summarizer', () => {
 
   test('warns when the guardrails find a missing lecture and skips auto-download', async ({ page }) => {
     await mockApi(page, { missingIds: ['V02'] });
-    await page.goto('/');
+    await openCourse(page);
     let downloaded = false;
     page.on('download', () => (downloaded = true));
 
@@ -86,7 +88,7 @@ test.describe('Lecture Batch Summarizer', () => {
 
   test('lets the user edit Markdown and merge chapters locally', async ({ page }) => {
     await mockApi(page);
-    await page.goto('/');
+    await openCourse(page);
     await upload(page);
     await expect(page.getByTestId('series-preview')).toBeVisible();
 
@@ -101,18 +103,20 @@ test.describe('Lecture Batch Summarizer', () => {
     await expect(page.getByLabel('Lokal zusammengefügte Kapitel')).toHaveValue(/Lernzusammenfassung \(Batch\)[\s\S]*<!--VID:V01-->/);
   });
 
-  test('clears the list', async ({ page }) => {
+  test('clears queued videos without touching saved chapters', async ({ page }) => {
     await mockApi(page);
-    await page.goto('/');
+    await openCourse(page);
+    await page.getByText('Automatik & Leistung').click();
+    await page.getByRole('switch', { name: /Batch automatisch starten/ }).uncheck({ force: true });
     await upload(page);
-    await expect(page.getByTestId('lecture-item').getByText('Fertig')).toHaveCount(3);
-    await page.getByRole('button', { name: 'Liste leeren' }).click();
+    await expect(page.getByTestId('lecture-item').getByText('Wartet')).toHaveCount(3);
+    await page.getByRole('button', { name: 'Warteschlange leeren' }).click();
     await expect(page.getByText('Noch keine Videos')).toBeVisible();
   });
 
   test('has no horizontal overflow', async ({ page }) => {
     await mockApi(page);
-    await page.goto('/');
+    await openCourse(page);
     await upload(page);
     await expect(page.getByTestId('series-preview')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -123,9 +127,11 @@ test.describe('Lecture Batch Summarizer', () => {
     test(`has no serious accessibility violations (${colorScheme})`, async ({ page }) => {
       await page.emulateMedia({ colorScheme });
       await mockApi(page);
-      await page.goto('/');
+      await openCourse(page);
       await upload(page);
       await expect(page.getByTestId('series-preview')).toBeVisible();
+      await expect(page.getByTestId('lecture-item').getByText('Fertig')).toHaveCount(3);
+      await settleAnimations(page);
       const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
       const serious = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
       expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
