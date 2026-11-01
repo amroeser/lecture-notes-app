@@ -29,3 +29,17 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  desktop:
+    # Builds the Electron app unpacked and runs the Electron tests (safeStorage needs the macOS keychain).
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npm run test:desktop
