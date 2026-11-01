@@ -1,0 +1,80 @@
+name: Release
+
+# Push a tag like v1.1.0 (matching package.json "version") to build unsigned installers
+# for macOS (Apple silicon + Intel) and Windows and attach them to a draft release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest # Apple silicon
+            args: --mac --arm64
+          - os: macos-15-intel # Intel
+            args: --mac --x64
+          - os: windows-latest
+            args: --win --x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      # ffmpeg-static downloads the ffmpeg binary for the runner's platform/arch during install.
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          # No signing certificates yet: skip auto-discovery of identities in the keychain.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            dist-desktop/release/*.dmg
+            dist-desktop/release/*.zip
+            dist-desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la installers
+          gh release create "$GITHUB_REF_NAME" installers/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "Lecture Batch Summarizer $GITHUB_REF_NAME" \
+            --generate-notes
