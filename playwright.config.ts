@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = Number(process.env.E2E_PORT || 3219);
@@ -26,6 +28,10 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    env: { OPENAI_API_KEY: 'sk-e2e-not-used' },
+    // Fresh, throwaway library per run so tests never see real courses or each other's leftovers from earlier runs.
+    env: {
+      OPENAI_API_KEY: 'sk-e2e-not-used',
+      LBS_DATA_DIR: process.env.LBS_DATA_DIR || path.join(os.tmpdir(), `lbs-e2e-${process.pid}-${Date.now()}`),
+    },
   },
 });

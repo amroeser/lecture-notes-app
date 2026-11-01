@@ -1,4 +1,5 @@
-import type { Page, Route } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { expect, type APIRequestContext, type Page, type Route } from '@playwright/test';
 
 /**
  * Fixture data for a fictional lecture series. The OpenAI-backed API routes are
@@ -168,4 +169,24 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       }),
     );
   }
+}
+
+/** Unique title so parallel tests (desktop + mobile) never collide in the shared library. */
+export function uniqueTitle(prefix = 'Kurs') {
+  return `${prefix} ${randomUUID().slice(0, 8)}`;
+}
+
+export async function createCourse(request: APIRequestContext, title = uniqueTitle()): Promise<string> {
+  const res = await request.post('/api/library', { data: { title } });
+  expect(res.status()).toBe(201);
+  const json = (await res.json()) as { course: { id: string } };
+  return json.course.id;
+}
+
+/** Creates a course through the API and opens its workspace. */
+export async function openCourse(page: Page, title = uniqueTitle()) {
+  const id = await createCourse(page.request, title);
+  await page.goto(`/course/${id}`);
+  await expect(page.getByTestId('file-input')).toBeAttached();
+  return { id, title };
 }
