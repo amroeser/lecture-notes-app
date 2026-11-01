@@ -3,7 +3,7 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = Number(process.env.E2E_PORT || 3219);
-const baseURL = `http://localhost:${PORT}`;
+const baseURL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -24,12 +24,14 @@ export default defineConfig({
   ],
   webServer: {
     // Production build: no dev overlay in screenshots, same code path as deployments.
-    command: `npm run build && npx next start -p ${PORT}`,
+    command: `npm run build && node scripts/start-standalone.mjs`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
     // Fresh, throwaway library per run so tests never see real courses or each other's leftovers from earlier runs.
     env: {
+      PORT: String(PORT),
+      HOSTNAME: '127.0.0.1',
       OPENAI_API_KEY: 'sk-e2e-not-used',
       LBS_DATA_DIR: process.env.LBS_DATA_DIR || path.join(os.tmpdir(), `lbs-e2e-${process.pid}-${Date.now()}`),
     },

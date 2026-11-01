@@ -41,7 +41,7 @@ test.afterAll(async () => {
 
 test('starts the local server and shows the start page', async () => {
   await appOrigin();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Lecture Batch Summarizer');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(/Deine Kurse|Your courses/);
   expect(await page.evaluate(() => window.lbsDesktop?.isDesktop)).toBe(true);
   // No Node.js in the page.
   expect(await page.evaluate(() => typeof (globalThis as { require?: unknown }).require)).toBe('undefined');

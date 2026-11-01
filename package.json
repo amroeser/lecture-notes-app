@@ -33,7 +33,8 @@
     "desktop:dist": "node scripts/build-desktop.mjs && electron-builder --publish never",
     "desktop:icon": "node scripts/generate-icon.mjs",
     "test:desktop": "playwright test -c playwright.desktop.config.ts",
-    "desktop:smoke": "node scripts/smoke-packaged.mjs"
+    "desktop:smoke": "node scripts/smoke-packaged.mjs",
+    "start:standalone": "node scripts/start-standalone.mjs"
   },
   "dependencies": {
     "jspdf": "^4.2.1",
