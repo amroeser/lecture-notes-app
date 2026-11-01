@@ -390,7 +390,7 @@ export default function LectureNotesApp({ courseId }: { courseId: string }) {
             aria-valuemin={0}
             aria-valuemax={100}
           >
-            <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${progress}%` }} />
+            <div className="h-full w-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out" style={{ transform: `scaleX(${progress / 100})` }} />
           </div>
         </Card>
 
@@ -475,7 +475,7 @@ export default function LectureNotesApp({ courseId }: { courseId: string }) {
               <details className="group rounded-xl border border-line px-4 open:pb-2">
                 <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
                   {t.automation}
-                  <span className="text-muted transition-transform group-open:rotate-180">⌄</span>
+                  <span className="text-muted transition-transform duration-200 ease-out group-open:rotate-180">⌄</span>
                 </summary>
                 <div className="divide-y divide-line">
                   <Toggle label={t.autoStartLabel} hint={t.autoStartHint} checked={autoStartBatch} onChange={setAutoStartBatch} disabled={isBatchRunning} />
@@ -533,7 +533,7 @@ export default function LectureNotesApp({ courseId }: { courseId: string }) {
               ) : (
                 <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label={t.videosList} tabIndex={0}>
                   {items.map((item) => (
-                    <li key={item.id} data-testid="lecture-item" className="rounded-xl border border-line bg-surface p-3.5 sm:p-4">
+                    <li key={item.id} data-testid="lecture-item" className="enter rounded-xl border border-line bg-surface p-3.5 sm:p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 items-start gap-3">
                           <span className="mt-0.5 rounded-md bg-surface-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted">{item.videoId}</span>
@@ -637,7 +637,7 @@ export default function LectureNotesApp({ courseId }: { courseId: string }) {
                 role="status"
                 data-testid="guardrail-banner"
                 className={cx(
-                  'mb-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm',
+                  'enter mb-4 flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm',
                   missingIds.length === 0 ? 'bg-success-soft text-success' : 'bg-warning-soft text-warning',
                 )}
               >
@@ -652,7 +652,7 @@ export default function LectureNotesApp({ courseId }: { courseId: string }) {
                   data-testid="series-preview"
                   tabIndex={0}
                   aria-label={t.seriesPreviewLabel}
-                  className="prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
+                  className="enter prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{toPreviewMarkdown(seriesMarkdown)}</ReactMarkdown>
                 </article>

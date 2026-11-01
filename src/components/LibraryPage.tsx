@@ -115,8 +115,8 @@ export default function LibraryPage() {
 
         {courses && courses.length > 0 && (
           <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label={t.coursesList}>
-            {courses.map((c) => (
-              <CourseCard key={c.id} course={c} t={t} locale={locale} onRenamed={onRenamed} onDelete={() => setToDelete(c)} />
+            {courses.map((c, i) => (
+              <CourseCard key={c.id} index={i} course={c} t={t} locale={locale} onRenamed={onRenamed} onDelete={() => setToDelete(c)} />
             ))}
           </ul>
         )}
@@ -226,12 +226,14 @@ function EmptyLibrary({ t, onCreate }: { t: Messages; onCreate: () => void }) {
 }
 
 function CourseCard({
+  index,
   course,
   t,
   locale,
   onRenamed,
   onDelete,
 }: {
+  index: number;
   course: CourseSummary;
   t: Messages;
   locale: Locale;
@@ -263,8 +265,8 @@ function CourseCard({
   };
 
   return (
-    <li data-testid="course-card" className="group relative">
-      <Card className="flex h-full flex-col p-5 transition-shadow focus-within:ring-2 focus-within:ring-accent/30 hover:shadow-[0_1px_2px_rgb(0_0_0/0.04),0_12px_32px_-12px_rgb(0_0_0/0.16)]">
+    <li data-testid="course-card" className="rise group relative" style={{ '--i': index } as React.CSSProperties}>
+      <Card className="flex h-full flex-col p-5 transition-shadow duration-200 ease-out focus-within:ring-2 focus-within:ring-accent/30 hover:shadow-[0_1px_2px_rgb(0_0_0/0.04),0_12px_32px_-12px_rgb(0_0_0/0.16)]">
         {editing ? (
           <form
             onSubmit={(e) => {

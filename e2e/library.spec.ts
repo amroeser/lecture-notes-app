@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { createCourse, fakeVideo, lectures, mockApi, openCourse, uniqueTitle } from './fixtures';
+import { createCourse, fakeVideo, lectures, mockApi, openCourse, uniqueTitle, settleAnimations } from './fixtures';
 
 /** The library is shared by all parallel tests, so cards are always looked up by their unique title. */
 const card = (page: Page, title: string) => page.getByTestId('course-card').filter({ hasText: title });
@@ -174,6 +174,7 @@ test.describe('Course library', () => {
       await createCourse(page.request);
       await page.goto('/');
       await expect(page.getByTestId('course-card').first()).toBeVisible();
+      await settleAnimations(page);
       const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
       const serious = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
       expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
