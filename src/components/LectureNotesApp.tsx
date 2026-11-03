@@ -4,6 +4,8 @@ import { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button, Card, CardHeader, Icon, Segmented, Stat, StatusPill, Toggle, cx, type FileStatus } from './ui';
+import { useLocale } from '@/i18n/useLocale';
+import { locales, type Locale, type Messages } from '@/i18n/messages';
 
 interface ProcessedLecture {
   id: string;
@@ -28,8 +30,8 @@ type OutputTab = 'preview' | 'markdown' | 'guardrails' | 'local';
 
 const today = () => new Date().toISOString().split('T')[0];
 
-function errorMessage(e: unknown) {
-  return e instanceof Error ? e.message : 'Unknown error';
+function errorMessage(e: unknown, fallback: string) {
+  return e instanceof Error ? e.message : fallback;
 }
 
 function downloadBlob(fileName: string, blob: Blob) {
@@ -51,6 +53,7 @@ function toPreviewMarkdown(md: string) {
 }
 
 export default function LectureNotesApp() {
+  const { locale, t, setLocale } = useLocale();
   const [items, setItems] = useState<ProcessedLecture[]>([]);
   const [combinedLetter, setCombinedLetter] = useState('');
   const [isBatchRunning, setIsBatchRunning] = useState(false);
@@ -97,7 +100,7 @@ export default function LectureNotesApp() {
       }
       downloadBlob(`series-${today()}.pdf`, await res.blob());
     } catch (e) {
-      setSeriesError(`PDF-Export fehlgeschlagen: ${errorMessage(e)}`);
+      setSeriesError(t.pdfError(errorMessage(e, t.unknownError)));
     }
   };
 
@@ -115,7 +118,7 @@ export default function LectureNotesApp() {
           chapterTitle: i.chapterTitle,
           chapterMarkdown: i.chapterMarkdown || i.summary || '',
         }));
-      if (chapters.length === 0) throw new Error('No chapters provided.');
+      if (chapters.length === 0) throw new Error(t.noChapters);
 
       const res = await fetch('/api/series-summary', {
         method: 'POST',
@@ -135,7 +138,7 @@ export default function LectureNotesApp() {
       if (ok && autoDownloadSeries) exportText(`series-${today()}.md`, md);
       if (ok && autoDownloadPdf) await exportPdf(md, seriesTitle);
     } catch (e) {
-      setSeriesError(`Serie konnte nicht generiert werden: ${errorMessage(e)}`);
+      setSeriesError(t.seriesError(errorMessage(e, t.unknownError)));
       setGuardrailReport(null);
     } finally {
       setIsSeriesRunning(false);
@@ -169,7 +172,7 @@ export default function LectureNotesApp() {
         ),
       );
     } catch (e) {
-      updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'error', error: errorMessage(e) } : p)));
+      updateItems((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'error', error: errorMessage(e, t.unknownError) } : p)));
     }
   };
 
@@ -220,20 +223,20 @@ export default function LectureNotesApp() {
     const joined = doneItems
       .map((i) => {
         const s = (i.chapterMarkdown || i.summary || '').trim();
-        return `# ${i.chapterTitle || i.file.name} <!--VID:${i.videoId}-->\n\n${s || '(keine Summary)'}\n`;
+        return `# ${i.chapterTitle || i.file.name} <!--VID:${i.videoId}-->\n\n${s || t.noSummary}\n`;
       })
       .join('\n');
-    setCombinedLetter(`Lernzusammenfassung (Batch)\nDatum: ${new Date().toLocaleDateString()}\n\n${joined}`.trim());
+    setCombinedLetter(`${t.localDocTitle}\n${t.localDocDate}: ${new Date().toLocaleDateString(locale)}\n\n${joined}`.trim());
     setActiveOutput('local');
   };
 
   const clearAll = () => updateItems(() => []);
 
   const tabs: Array<{ id: OutputTab; label: string }> = [
-    { id: 'preview', label: 'Vorschau' },
-    { id: 'markdown', label: 'Markdown' },
-    { id: 'guardrails', label: 'Guardrails' },
-    { id: 'local', label: 'Lokal' },
+    { id: 'preview', label: t.tabPreview },
+    { id: 'markdown', label: t.tabMarkdown },
+    { id: 'guardrails', label: t.tabGuardrails },
+    { id: 'local', label: t.tabLocal },
   ];
 
   return (
@@ -248,29 +251,37 @@ export default function LectureNotesApp() {
             </div>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Lecture Batch Summarizer</h1>
             <p className="mt-2 max-w-xl text-pretty text-muted">
-              Vorlesungsvideos rein, strukturiertes Lernskript raus: Transkript, Kapitel, Übungsfragen und PDF in einem Durchlauf.
+              {t.tagline}
             </p>
           </div>
-          <a
-            href="https://github.com/amroeser/lecture-notes-app"
-            className="inline-flex items-center gap-2 self-start text-sm text-muted transition-colors hover:text-foreground sm:self-auto"
-          >
-            <Icon.Github /> GitHub
-          </a>
+          <div className="flex items-center gap-4 self-start sm:self-auto">
+            <Segmented<Locale>
+              label={t.languageLabel}
+              value={locale}
+              onChange={setLocale}
+              options={locales.map((l) => ({ value: l, label: l.toUpperCase() }))}
+            />
+            <a
+              href="https://github.com/amroeser/lecture-notes-app"
+              className="inline-flex items-center gap-2 text-sm text-muted transition-colors hover:text-foreground"
+            >
+              <Icon.Github /> GitHub
+            </a>
+          </div>
         </header>
 
         {/* ---------- Stats ---------- */}
-        <Card className="mb-6 px-5 py-4 sm:px-6" aria-label="Status">
+        <Card className="mb-6 px-5 py-4 sm:px-6" aria-label={t.statusRegion}>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label="Videos" value={items.length} />
-            <Stat label="Fertig" value={doneItems.length} tone="success" />
-            <Stat label="In Arbeit" value={uploadingCount + queuedCount} tone="accent" />
-            <Stat label="Fehler" value={errorCount} tone="danger" />
+            <Stat label={t.statVideos} value={items.length} />
+            <Stat label={t.statDone} value={doneItems.length} tone="success" />
+            <Stat label={t.statActive} value={uploadingCount + queuedCount} tone="accent" />
+            <Stat label={t.statErrors} value={errorCount} tone="danger" />
           </div>
           <div
             className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-muted"
             role="progressbar"
-            aria-label="Fortschritt"
+            aria-label={t.progress}
             aria-valuenow={progress}
             aria-valuemin={0}
             aria-valuemax={100}
@@ -282,17 +293,17 @@ export default function LectureNotesApp() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
           {/* ---------- 1) Upload ---------- */}
           <Card className="lg:col-span-2">
-            <CardHeader step={1} title="Upload & Verarbeitung" description="Alle Videos einer Serie auswählen." />
+            <CardHeader step={1} title={t.uploadTitle} description={t.uploadDescription} />
             <div className="space-y-5 p-5 sm:p-6">
               <div>
                 <label htmlFor="series-title" className="mb-1.5 block text-sm font-medium">
-                  Serientitel <span className="font-normal text-muted">(optional)</span>
+                  {t.seriesTitleLabel} <span className="font-normal text-muted">{t.optional}</span>
                 </label>
                 <input
                   id="series-title"
                   value={seriesTitle}
                   onChange={(e) => setSeriesTitle(e.target.value)}
-                  placeholder="z. B. Statistik I – Wintersemester"
+                  placeholder={t.seriesTitlePlaceholder}
                   className="h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 />
               </div>
@@ -316,10 +327,10 @@ export default function LectureNotesApp() {
                 <div className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-full bg-accent-soft text-accent">
                   <Icon.Upload className="h-5 w-5" />
                 </div>
-                <p className="text-sm font-medium">MP4-Dateien hierher ziehen</p>
-                <p className="mt-1 text-xs text-muted">oder</p>
+                <p className="text-sm font-medium">{t.dropHere}</p>
+                <p className="mt-1 text-xs text-muted">{t.or}</p>
                 <Button size="sm" className="mt-2" onClick={() => fileInputRef.current?.click()}>
-                  Dateien auswählen
+                  {t.chooseFiles}
                 </Button>
                 <input
                   ref={fileInputRef}
@@ -327,7 +338,7 @@ export default function LectureNotesApp() {
                   type="file"
                   accept="video/mp4"
                   multiple
-                  aria-label="MP4-Dateien auswählen"
+                  aria-label={t.chooseFilesAria}
                   onChange={(e) => {
                     addFiles(e.target.files);
                     e.target.value = '';
@@ -339,31 +350,31 @@ export default function LectureNotesApp() {
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button variant="primary" className="sm:flex-1" onClick={() => void runBatch()} disabled={items.length === 0 || isBatchRunning}>
                   <Icon.Play />
-                  {isBatchRunning ? 'Batch läuft…' : 'Batch verarbeiten'}
+                  {isBatchRunning ? t.batchRunning : t.runBatch}
                 </Button>
                 <Button onClick={() => void generateSeries()} disabled={doneItems.length === 0 || isBatchRunning || isSeriesRunning || uploadingCount > 0}>
                   <Icon.Sparkles />
-                  {isSeriesRunning ? 'Serie wird gebaut…' : 'Serie generieren'}
+                  {isSeriesRunning ? t.seriesRunning : t.generateSeries}
                 </Button>
               </div>
 
               <details className="group rounded-xl border border-line px-4 open:pb-2">
                 <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                  Automatik & Leistung
+                  {t.automation}
                   <span className="text-muted transition-transform group-open:rotate-180">⌄</span>
                 </summary>
                 <div className="divide-y divide-line">
-                  <Toggle label="Batch automatisch starten" hint="Direkt nach der Dateiauswahl" checked={autoStartBatch} onChange={setAutoStartBatch} disabled={isBatchRunning} />
-                  <Toggle label="Serie automatisch generieren" hint="Nachdem alle Videos fertig sind" checked={autoGenerateSeries} onChange={setAutoGenerateSeries} />
-                  <Toggle label="Markdown automatisch laden" hint="Nur wenn die Guardrails OK sind" checked={autoDownloadSeries} onChange={setAutoDownloadSeries} />
-                  <Toggle label="PDF automatisch laden" hint="Nur wenn die Guardrails OK sind" checked={autoDownloadPdf} onChange={setAutoDownloadPdf} />
+                  <Toggle label={t.autoStartLabel} hint={t.autoStartHint} checked={autoStartBatch} onChange={setAutoStartBatch} disabled={isBatchRunning} />
+                  <Toggle label={t.autoSeriesLabel} hint={t.autoSeriesHint} checked={autoGenerateSeries} onChange={setAutoGenerateSeries} />
+                  <Toggle label={t.autoMarkdownLabel} hint={t.onlyIfGuardrailsOk} checked={autoDownloadSeries} onChange={setAutoDownloadSeries} />
+                  <Toggle label={t.autoPdfLabel} hint={t.onlyIfGuardrailsOk} checked={autoDownloadPdf} onChange={setAutoDownloadPdf} />
                   <div className="flex items-center justify-between gap-4 py-2.5">
                     <span>
-                      <span className="block text-sm font-medium">Parallelität</span>
-                      <span className="block text-xs text-muted">Videos gleichzeitig</span>
+                      <span className="block text-sm font-medium">{t.parallelism}</span>
+                      <span className="block text-xs text-muted">{t.parallelismHint}</span>
                     </span>
                     <Segmented
-                      label="Parallelität"
+                      label={t.parallelism}
                       value={parallelism}
                       onChange={setParallelism}
                       disabled={isBatchRunning}
@@ -376,7 +387,7 @@ export default function LectureNotesApp() {
               <p className="flex items-start gap-2 text-xs text-muted">
                 <Icon.Alert className="mt-px h-3.5 w-3.5" />
                 <span>
-                  Server benötigt <code className="font-mono">ffmpeg</code> und <code className="font-mono">OPENAI_API_KEY</code>.
+                  {t.serverNeedsPrefix} <code className="font-mono">ffmpeg</code> {t.and} <code className="font-mono">OPENAI_API_KEY</code>.
                 </span>
               </p>
             </div>
@@ -386,12 +397,12 @@ export default function LectureNotesApp() {
           <Card className="flex flex-col lg:col-span-3">
             <CardHeader
               step={2}
-              title="Kapitel pro Video"
-              description="Jedes Video wird zu einem Kapitel im Lernlayout."
+              title={t.chaptersTitle}
+              description={t.chaptersDescription}
               actions={
                 items.length > 0 && (
                   <Button variant="ghost" size="sm" onClick={clearAll} disabled={isBatchRunning}>
-                    <Icon.Trash /> Liste leeren
+                    <Icon.Trash /> {t.clearList}
                   </Button>
                 )
               }
@@ -401,12 +412,12 @@ export default function LectureNotesApp() {
                 <div className="grid h-full min-h-60 place-items-center rounded-xl border border-dashed border-line text-center">
                   <div className="px-6">
                     <Icon.Video className="mx-auto mb-3 h-6 w-6 text-muted" />
-                    <p className="text-sm font-medium">Noch keine Videos</p>
-                    <p className="mt-1 text-xs text-muted">Hochgeladene Vorlesungen erscheinen hier mit Status.</p>
+                    <p className="text-sm font-medium">{t.noVideos}</p>
+                    <p className="mt-1 text-xs text-muted">{t.noVideosHint}</p>
                   </div>
                 </div>
               ) : (
-                <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label="Videos" tabIndex={0}>
+                <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label={t.videosList} tabIndex={0}>
                   {items.map((item) => (
                     <li key={item.id} data-testid="lecture-item" className="rounded-xl border border-line bg-surface p-3.5 sm:p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -420,22 +431,22 @@ export default function LectureNotesApp() {
                             </div>
                           </div>
                         </div>
-                        <StatusPill status={item.status} />
+                        <StatusPill status={item.status} label={t.status[item.status]} />
                       </div>
                       {item.status === 'uploading' && (
                         <div className="mt-3">
                           <div className="shimmer relative h-1 overflow-hidden rounded-full bg-accent-soft" />
-                          <p className="mt-1.5 text-xs text-muted">Transkribieren & Kapitel erstellen…</p>
+                          <p className="mt-1.5 text-xs text-muted">{t.processing}</p>
                         </div>
                       )}
                       {item.error && <p className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">{item.error}</p>}
                       {item.status === 'done' && (
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button size="sm" onClick={() => exportText(`${item.file.name}.transcript.txt`, item.transcript || '')}>
-                            <Icon.File /> Transkript
+                            <Icon.File /> {t.transcript}
                           </Button>
                           <Button size="sm" onClick={() => exportText(`${item.file.name}.chapter.md`, item.chapterMarkdown || item.summary || '')}>
-                            <Icon.Download /> Kapitel
+                            <Icon.Download /> {t.chapter}
                           </Button>
                         </div>
                       )}
@@ -451,12 +462,12 @@ export default function LectureNotesApp() {
         <Card className="mt-6">
           <CardHeader
             step={3}
-            title="Serien-Ausgabe"
-            description="Sortiert, geprüft und exportfertig."
+            title={t.outputTitle}
+            description={t.outputDescription}
             actions={
               <>
                 <Button size="sm" onClick={generateCombinedLetter} disabled={doneItems.length === 0}>
-                  <Icon.Layers /> Lokal zusammenfügen
+                  <Icon.Layers /> {t.mergeLocally}
                 </Button>
                 {seriesMarkdown && (
                   <>
@@ -474,7 +485,7 @@ export default function LectureNotesApp() {
                     variant="ghost"
                     onClick={() => exportText(`series-guardrails-${today()}.json`, JSON.stringify(guardrailReport, null, 2))}
                   >
-                    <Icon.Shield /> Report
+                    <Icon.Shield /> {t.report}
                   </Button>
                 )}
               </>
@@ -482,7 +493,7 @@ export default function LectureNotesApp() {
           />
 
           <div className="p-5 sm:p-6">
-            <div role="tablist" aria-label="Ausgabe" className="mb-4 flex gap-0.5 border-b border-line sm:gap-1">
+            <div role="tablist" aria-label={t.outputTabs} className="mb-4 flex gap-0.5 border-b border-line sm:gap-1">
               {tabs.map((t) => (
                 <button
                   key={t.id}
@@ -517,8 +528,8 @@ export default function LectureNotesApp() {
               >
                 {missingIds.length === 0 ? <Icon.Shield className="mt-0.5" /> : <Icon.Alert className="mt-0.5" />}
                 {missingIds.length === 0
-                  ? 'Guardrails OK – alle Videos sind in der Serie enthalten.'
-                  : `Achtung: In der Serie fehlen ${missingIds.join(', ')}.`}
+                  ? t.guardrailsOk
+                  : t.guardrailsMissing(missingIds.join(', '))}
               </div>
             )}
 
@@ -527,22 +538,22 @@ export default function LectureNotesApp() {
                 <article
                   data-testid="series-preview"
                   tabIndex={0}
-                  aria-label="Vorschau der Serie"
+                  aria-label={t.seriesPreviewLabel}
                   className="prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{toPreviewMarkdown(seriesMarkdown)}</ReactMarkdown>
                 </article>
               ) : (
-                <EmptyOutput busy={isSeriesRunning} />
+                <EmptyOutput busy={isSeriesRunning} t={t} />
               ))}
 
             {activeOutput === 'markdown' && (
               <textarea
-                aria-label="Serie als Markdown"
+                aria-label={t.markdownAria}
                 value={seriesMarkdown}
                 onChange={(e) => setSeriesMarkdown(e.target.value)}
                 className="h-[28rem] w-full rounded-xl border border-line bg-surface p-4 font-mono text-[13px] leading-relaxed focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-                placeholder="Hier erscheint die serverseitig sortierte Serie…"
+                placeholder={t.markdownPlaceholder}
               />
             )}
 
@@ -552,42 +563,42 @@ export default function LectureNotesApp() {
                 tabIndex={0}
                 className="h-[28rem] overflow-auto rounded-xl border border-line bg-surface-muted p-4 font-mono text-[13px] leading-relaxed"
               >
-                {guardrailReport ? JSON.stringify(guardrailReport, null, 2) : 'Der Guardrail-Report erscheint nach dem Generieren der Serie.'}
+                {guardrailReport ? JSON.stringify(guardrailReport, null, 2) : t.guardrailsEmpty}
               </pre>
             )}
 
             {activeOutput === 'local' &&
               (combinedLetter ? (
                 <textarea
-                  aria-label="Lokal zusammengefügte Kapitel"
+                  aria-label={t.localAria}
                   value={combinedLetter}
                   onChange={(e) => setCombinedLetter(e.target.value)}
                   className="h-[28rem] w-full rounded-xl border border-line bg-surface p-4 font-mono text-[13px] leading-relaxed focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 />
               ) : (
                 <div className="grid h-60 place-items-center rounded-xl border border-dashed border-line px-6 text-center text-sm text-muted">
-                  Optional: Kapitel lokal zusammenfügen – ohne Sortierung und Guardrails.
+                  {t.localEmpty}
                 </div>
               ))}
           </div>
         </Card>
 
         <footer className="mt-10 text-center text-xs text-muted">
-          MIT License · Ergebnisse sind KI-generiert und ersetzen kein eigenes Lernen.
+          {t.footer}
         </footer>
       </div>
     </div>
   );
 }
 
-function EmptyOutput({ busy }: { busy: boolean }) {
+function EmptyOutput({ busy, t }: { busy: boolean; t: Messages }) {
   return (
     <div className="grid h-60 place-items-center rounded-xl border border-dashed border-line px-6 text-center">
       <div>
         <Icon.Sparkles className={cx('mx-auto mb-3 h-6 w-6', busy ? 'animate-pulse text-accent' : 'text-muted')} />
-        <p className="text-sm font-medium">{busy ? 'Serie wird gebaut…' : 'Noch keine Serie'}</p>
+        <p className="text-sm font-medium">{busy ? t.seriesRunning : t.emptySeries}</p>
         <p className="mt-1 text-xs text-muted">
-          {busy ? 'Kapitel werden sortiert, geglättet und geprüft.' : 'Nach der Verarbeitung erscheint hier das fertige Lernskript.'}
+          {busy ? t.buildingHint : t.emptySeriesHint}
         </p>
       </div>
     </div>
