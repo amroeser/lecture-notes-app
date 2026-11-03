@@ -1,5 +1,5 @@
-import LectureNotesApp from '@/components/LectureNotesApp';
+import LibraryPage from '@/components/LibraryPage';
 
 export default function Home() {
-  return <LectureNotesApp />;
+  return <LibraryPage />;
 }

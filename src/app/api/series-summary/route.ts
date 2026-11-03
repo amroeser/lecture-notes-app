@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { createTextClient, readTextConfig, textCacheTag, TextConfigError, type TextClient, type TextConfig, type TextRequest } from '../_utils/textModel';
 import { readJsonCache, sha256Hex, writeJsonCache } from '../_utils/fsCache';
 
 export const runtime = 'nodejs';
@@ -130,16 +130,9 @@ function extractTitle(md: string) {
   return m?.[1]?.trim();
 }
 
-type ChatReq = OpenAI.ChatCompletionCreateParamsNonStreaming;
+type ChatReq = TextRequest;
 
-function withOptionalTemperature(req: ChatReq, model: string, temperature: number) {
-  if (!/^gpt-5/i.test(model)) {
-    req.temperature = temperature;
-  }
-  return req;
-}
-
-async function orderChapters(client: OpenAI, model: string, chapters: ChapterInput[]) {
+async function orderChapters(client: TextClient, model: string, chapters: ChapterInput[]) {
   const items = chapters.map((c) => ({
     videoId: c.videoId,
     fileName: c.fileName,
@@ -162,10 +155,7 @@ async function orderChapters(client: OpenAI, model: string, chapters: ChapterInp
     ],
   };
 
-  const temperature = Number(process.env.OPENAI_TEMPERATURE ?? '0.2');
-  const resp = await client.chat.completions.create(withOptionalTemperature(req, model, temperature));
-
-  const content = resp.choices[0]?.message?.content ?? '';
+  const content = (await client.complete(req)) ?? '';
   const jsonStart = content.indexOf('{');
   const jsonEnd = content.lastIndexOf('}');
   const slice = jsonStart >= 0 && jsonEnd >= 0 ? content.slice(jsonStart, jsonEnd + 1) : content;
@@ -200,7 +190,7 @@ function buildBaseMarkdown(seriesTitle: string, ordered: ChapterInput[]) {
   return `# ${seriesTitle || 'Vorlesungsserie – Lernskript'}\n\n## Inhaltsverzeichnis\n${toc}\n${chaptersText}`.trim();
 }
 
-async function compileSeries(client: OpenAI, model: string, seriesTitle: string, ordered: ChapterInput[]) {
+async function compileSeries(client: TextClient, model: string, seriesTitle: string, ordered: ChapterInput[]) {
   const baseMarkdown = buildBaseMarkdown(seriesTitle, ordered);
 
   const req: ChatReq = {
@@ -218,15 +208,12 @@ async function compileSeries(client: OpenAI, model: string, seriesTitle: string,
     ],
   };
 
-  const temperature = Number(process.env.OPENAI_TEMPERATURE ?? '0.2');
-  const resp = await client.chat.completions.create(withOptionalTemperature(req, model, temperature));
-
-  const seriesMarkdown = resp.choices[0]?.message?.content ?? baseMarkdown;
+  const seriesMarkdown = (await client.complete(req)) ?? baseMarkdown;
   return { seriesMarkdown, baseMarkdown };
 }
 
 async function reduceChunksToFinal(
-  client: OpenAI,
+  client: TextClient,
   finalModel: string,
   seriesTitle: string,
   chunkMarkdowns: string[],
@@ -253,20 +240,18 @@ async function reduceChunksToFinal(
     ],
   };
 
-  const temperature = Number(process.env.OPENAI_TEMPERATURE ?? '0.2');
-  const resp = await client.chat.completions.create(withOptionalTemperature(req, finalModel, temperature));
-  return resp.choices[0]?.message?.content ?? '';
+  return (await client.complete(req)) ?? '';
 }
 
 export async function POST(req: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: 'Missing OPENAI_API_KEY in environment.' }, { status: 500 });
+  // Series generation only needs the text provider; transcription keys are irrelevant here.
+  let textConfig: TextConfig;
+  try {
+    textConfig = readTextConfig();
+  } catch (err: unknown) {
+    const message = err instanceof TextConfigError ? err.message : 'Invalid text model configuration.';
+    return NextResponse.json({ error: message, step: 'config' }, { status: 500 });
   }
-
-  const baseURL = process.env.OPENAI_BASE_URL || undefined;
-  const textApiKey = process.env.OPENAI_TEXT_API_KEY || apiKey;
-  const textBaseURL = process.env.OPENAI_TEXT_BASE_URL || baseURL;
 
   const seriesModel = process.env.OPENAI_SERIES_MODEL || process.env.OPENAI_SUMMARY_MODEL || 'gpt-5.1-mini';
   const seriesFinalModel = process.env.OPENAI_SERIES_FINAL_MODEL || seriesModel;
@@ -291,7 +276,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'videoId must be unique per chapter.' }, { status: 400 });
   }
 
-  const client = new OpenAI({ apiKey: textApiKey, baseURL: textBaseURL });
+  const client = createTextClient(textConfig, { signal: req.signal });
 
   try {
     const fallbackOrder: string[] = chapters.map((c) => String(c.videoId));
@@ -327,6 +312,7 @@ export async function POST(req: Request) {
         seriesFinalModel,
         chunkSize,
         promptVersion,
+        ...textCacheTag(textConfig),
       }),
     );
 
@@ -396,9 +382,7 @@ export async function POST(req: Request) {
           },
         ],
       };
-      const temperature = Number(process.env.OPENAI_TEMPERATURE ?? '0.2');
-      const repair = await client.chat.completions.create(withOptionalTemperature(req, seriesModel, temperature));
-      seriesMarkdown = repair.choices[0]?.message?.content ?? seriesMarkdown;
+      seriesMarkdown = (await client.complete(req)) ?? seriesMarkdown;
     }
 
     const finalMissingIds = uniqueIds.filter((id: string) => !hasChapterHeading(seriesMarkdown, id));
@@ -422,6 +406,7 @@ export async function POST(req: Request) {
       chunkSize,
       seriesModel,
       seriesFinalModel,
+      ...textCacheTag(textConfig),
       perChapter: orderedChapters.map((c) => ({
         videoId: c.videoId,
         chapterTitle: c.chapterTitle,

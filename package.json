@@ -1,6 +1,6 @@
 {
   "name": "lecture-batch-summarizer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Automatische Verarbeitung von Vorlesungsvideos (MP4) zu strukturierten Lernzusammenfassungen mit KI-gestützter Transkription und PDF-Export.",
   "keywords": [
     "lecture",
@@ -27,7 +27,14 @@
     "lint": "eslint",
     "test:e2e": "playwright test --project=desktop --project=mobile",
     "media": "playwright test --project=media",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:dev": "node scripts/build-desktop.mjs --electron-only && node scripts/desktop-dev.mjs",
+    "desktop:dist": "node scripts/build-desktop.mjs && electron-builder --publish never",
+    "desktop:icon": "node scripts/generate-icon.mjs",
+    "test:desktop": "playwright test -c playwright.desktop.config.ts",
+    "desktop:smoke": "node scripts/smoke-packaged.mjs",
+    "start:standalone": "node scripts/start-standalone.mjs"
   },
   "dependencies": {
     "jspdf": "^4.2.1",
@@ -47,8 +54,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "^1.0.0",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "eslint": "^10",
     "eslint-config-next": "^16.4.4",
+    "ffmpeg-static": "^5.3.0",
     "tailwindcss": "^4",
     "typescript": "^6.0.3"
   }
