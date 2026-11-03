@@ -3,7 +3,7 @@
 appId: de.alexanderroeser.lecturebatchsummarizer
 productName: Lecture Batch Summarizer
 copyright: Copyright © Alexander Maximilian Röser
-artifactName: LectureBatchSummarizer-${version}-${os}-${arch}.${ext}
+artifactName: LectureBatchSummarizer-${os}-${arch}.${ext}
 
 directories:
   app: electron/app
@@ -42,7 +42,7 @@ mac:
   identity: "-"
   hardenedRuntime: false
   gatekeeperAssess: false
-  artifactName: LectureBatchSummarizer-${version}-mac-${arch}.${ext}
+  artifactName: LectureBatchSummarizer-mac-${arch}.${ext}
 
 dmg:
   title: Lecture Batch Summarizer ${version}
@@ -52,13 +52,13 @@ win:
   target:
     - nsis
     - zip
-  artifactName: LectureBatchSummarizer-${version}-win-${arch}.${ext}
+  artifactName: LectureBatchSummarizer-win-${arch}.${ext}
 
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: LectureBatchSummarizer-${version}-win-${arch}-setup.${ext}
+  artifactName: LectureBatchSummarizer-win-${arch}-setup.${ext}
   differentialPackage: false
 
 linux:
