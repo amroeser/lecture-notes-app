@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
 import { readJsonCache, sha256Hex, writeJsonCache } from '../_utils/fsCache';
+import { createTextClient, readTextConfig, textCacheTag, TextConfigError, type TextConfig, type TextRequest } from '../_utils/textModel';
 import { readTranscribeConfig, transcribeAudio, TranscribeConfigError, type TranscribeConfig } from '../_utils/transcribe';
 
 export const runtime = 'nodejs';
@@ -87,21 +87,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message, step: 'config' }, { status: 500 });
   }
 
-  // Chapter generation always uses the OpenAI-compatible text client, independent of the transcription provider.
-  const baseURL = process.env.OPENAI_BASE_URL || undefined;
-  const textApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
-  const textBaseURL = process.env.OPENAI_TEXT_BASE_URL || baseURL;
-  if (!textApiKey) {
-    return NextResponse.json(
-      { error: 'Missing OPENAI_API_KEY (or OPENAI_TEXT_API_KEY) in environment for chapter generation.', step: 'config' },
-      { status: 500 },
-    );
+  // Chapter generation runs on the text provider (OpenAI-compatible API or a local CLI), independent of transcription.
+  let textConfig: TextConfig;
+  try {
+    textConfig = readTextConfig();
+  } catch (err: unknown) {
+    const message = err instanceof TextConfigError ? err.message : 'Invalid text model configuration.';
+    return NextResponse.json({ error: message, step: 'config' }, { status: 500 });
   }
 
   const transcribeProvider = transcribeConfig.provider;
   const transcribeModel = transcribeConfig.model;
   const summaryModel = process.env.OPENAI_SUMMARY_MODEL || 'gpt-5.1-mini';
-  const temperature = Number(process.env.OPENAI_TEMPERATURE ?? '0.2');
+  const temperature = textConfig.provider === 'openai' ? textConfig.temperature : 0.2;
 
   const formData = await req.formData();
   const file = formData.get('file');
@@ -144,7 +142,7 @@ export async function POST(req: Request) {
       audioPath,
     ]);
 
-    const textClient = new OpenAI({ apiKey: textApiKey, baseURL: textBaseURL });
+    const textClient = createTextClient(textConfig, { signal: req.signal });
 
     const promptVersion = 'chapter-v3';
     const cacheKey = sha256Hex(
@@ -156,6 +154,7 @@ export async function POST(req: Request) {
         summaryModel,
         temperature: /^gpt-5/i.test(summaryModel) ? null : temperature,
         promptVersion,
+        ...textCacheTag(textConfig),
       }),
     );
 
@@ -184,7 +183,7 @@ export async function POST(req: Request) {
     });
 
     step = 'chapter';
-    const chapterReq: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+    const chapterReq: TextRequest = {
       model: summaryModel,
       messages: [
         {
@@ -200,12 +199,7 @@ export async function POST(req: Request) {
       ],
     };
 
-    if (!/^gpt-5/i.test(summaryModel)) {
-      chapterReq.temperature = temperature;
-    }
-
-    const summaryResponse = await textClient.chat.completions.create(chapterReq);
-    const rawChapterMarkdown = summaryResponse.choices[0]?.message?.content ?? '';
+    const rawChapterMarkdown = (await textClient.complete(chapterReq)) ?? '';
     const chapterMarkdown = sanitizeChapterMarkdown(rawChapterMarkdown);
     const chapterTitle = extractChapterTitle(chapterMarkdown) || file.name;
 
