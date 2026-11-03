@@ -1,0 +1,69 @@
+# Installers for the desktop app. Build inputs come from scripts/build-desktop.mjs.
+# Unsigned for now: macOS builds are ad-hoc signed so Apple silicon can run them at all.
+appId: de.alexanderroeser.lecturebatchsummarizer
+productName: Lecture Batch Summarizer
+copyright: Copyright © Alexander Maximilian Röser
+artifactName: LectureBatchSummarizer-${version}-${os}-${arch}.${ext}
+
+directories:
+  app: electron/app
+  output: dist-desktop/release
+  buildResources: build
+
+# The app folder only holds main.js, preload.js and package.json; it has no dependencies.
+files:
+  - main.js
+  - preload.js
+  - package.json
+  # electron/app has no node_modules; without this, electron-builder falls back to the repo's dependencies.
+  - "!**/node_modules/**"
+npmRebuild: false
+nodeGypRebuild: false
+asar: true
+
+# The standalone server (with its node_modules) is copied by scripts/after-pack.cjs,
+# because extraResources always drops node_modules folders.
+afterPack: scripts/after-pack.cjs
+
+extraResources:
+  - from: dist-desktop/ffmpeg
+    to: ffmpeg
+  - from: LICENSE
+    to: LICENSE.txt
+
+icon: build/icons/icon.png
+
+mac:
+  category: public.app-category.education
+  target:
+    - dmg
+    - zip
+  # Ad-hoc signature ("-"): no Apple Developer ID yet, but required for arm64 to launch.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: LectureBatchSummarizer-${version}-mac-${arch}.${ext}
+
+dmg:
+  title: Lecture Batch Summarizer ${version}
+  writeUpdateInfo: false
+
+win:
+  target:
+    - nsis
+    - zip
+  artifactName: LectureBatchSummarizer-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: LectureBatchSummarizer-${version}-win-${arch}-setup.${ext}
+  differentialPackage: false
+
+linux:
+  target:
+    - AppImage
+  category: Education
+
+publish: null
