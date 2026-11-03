@@ -55,3 +55,6 @@ AGENTS.md
 
 # Raw media recordings (converted by scripts/build-media.sh)
 /docs/media/raw/
+
+# Local course library (LBS_DATA_DIR default)
+/.data/
