@@ -406,7 +406,7 @@ export default function LectureNotesApp() {
                   </div>
                 </div>
               ) : (
-                <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label="Videos">
+                <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1" aria-label="Videos" tabIndex={0}>
                   {items.map((item) => (
                     <li key={item.id} data-testid="lecture-item" className="rounded-xl border border-line bg-surface p-3.5 sm:p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -526,6 +526,8 @@ export default function LectureNotesApp() {
               (seriesMarkdown ? (
                 <article
                   data-testid="series-preview"
+                  tabIndex={0}
+                  aria-label="Vorschau der Serie"
                   className="prose prose-zinc max-h-[36rem] max-w-none overflow-y-auto rounded-xl border border-line bg-surface px-5 py-4 dark:prose-invert prose-headings:tracking-tight prose-h1:text-2xl prose-h2:text-lg prose-table:text-sm sm:px-8 sm:py-6"
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{toPreviewMarkdown(seriesMarkdown)}</ReactMarkdown>
@@ -547,6 +549,7 @@ export default function LectureNotesApp() {
             {activeOutput === 'guardrails' && (
               <pre
                 data-testid="guardrail-json"
+                tabIndex={0}
                 className="h-[28rem] overflow-auto rounded-xl border border-line bg-surface-muted p-4 font-mono text-[13px] leading-relaxed"
               >
                 {guardrailReport ? JSON.stringify(guardrailReport, null, 2) : 'Der Guardrail-Report erscheint nach dem Generieren der Serie.'}

@@ -24,7 +24,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test --project=desktop --project=mobile",
+    "media": "playwright test --project=media",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "jspdf": "^4.2.1",
