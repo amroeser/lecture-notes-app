@@ -39,7 +39,7 @@ try {
   await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 60_000 });
   console.log(`[smoke] server ready after ${((Date.now() - started) / 1000).toFixed(1)} s at ${new URL(page.url()).origin}`);
   const h1 = await page.locator('h1').first().textContent();
-  if (!h1?.includes('Lecture Batch Summarizer')) throw new Error(`unexpected start page: ${h1}`);
+  if (!/Deine Kurse|Your courses/.test(h1 ?? '')) throw new Error(`unexpected start page: ${h1}`);
 
   const origin = new URL(page.url()).origin;
   const anonymous = await fetch(`${origin}/api/series-pdf`, { method: 'POST', body: '{}' });
