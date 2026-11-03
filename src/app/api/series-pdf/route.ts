@@ -182,8 +182,11 @@ function generatePDFFromElements(doc: jsPDF, elements: PDFElement[], title: stri
     });
   };
 
-  // Title
-  if (title) {
+  // Title (skipped when the Markdown already opens with the same H1, which the series route always emits)
+  const first = elements[0];
+  const titleIsFirstHeading =
+    first?.type === 'h1' && sanitizeForPdf(first.content).trim() === sanitizeForPdf(title).trim();
+  if (title && !titleIsFirstHeading) {
     writeText(title, 18, true);
     y += 8;
   }
