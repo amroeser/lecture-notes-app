@@ -141,18 +141,20 @@ for (const { id, locale } of locales) {
       await ctx.close();
     }
 
-    const mobile = await browser.newContext({ locale, viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
-    const m = await mobile.newPage();
-    await mockApi(m);
-    await withTempCourse(request, async (courseId) => {
-      await m.goto(`/course/${courseId}`);
-      await runFlow(m);
-      await m.evaluate(() => window.scrollTo(0, 0));
-      await m.waitForTimeout(300);
-      await settleAnimations(m);
-      await m.screenshot({ path: path.join(OUT, `mobile-${id}.png`) });
-    });
-    await mobile.close();
+    for (const colorScheme of ['light', 'dark'] as const) {
+      const mobile = await browser.newContext({ locale, colorScheme, viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+      const m = await mobile.newPage();
+      await mockApi(m);
+      await withTempCourse(request, async (courseId) => {
+        await m.goto(`/course/${courseId}`);
+        await runFlow(m);
+        await m.evaluate(() => window.scrollTo(0, 0));
+        await m.waitForTimeout(300);
+        await settleAnimations(m);
+        await m.screenshot({ path: path.join(OUT, `mobile-${id}-${colorScheme}.png`) });
+      });
+      await mobile.close();
+    }
   });
 
   test(`demo video (${id})`, async ({ browser, request }) => {

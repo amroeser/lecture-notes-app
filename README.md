@@ -1,124 +1,114 @@
-<div align="center">
+<p align="center">
+  <img src="src/app/icon.svg" width="76" height="76" alt="Lecture Batch Summarizer" />
+</p>
 
-<img src="src/app/icon.svg" width="72" height="72" alt="" />
+<p align="center">A free, open-source desktop app that turns lecture recordings into study guides</p>
 
-# Lecture Batch Summarizer
+<p align="center">
+  <a href="https://github.com/amroeser/lecture-notes-app/releases/latest"><img src="https://img.shields.io/github/v/release/amroeser/lecture-notes-app?color=4f46e5&label=release" alt="Latest release" /></a>
+  <a href="https://github.com/amroeser/lecture-notes-app/actions/workflows/ci.yml"><img src="https://github.com/amroeser/lecture-notes-app/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-a1a1aa" alt="License: MIT" /></a>
+</p>
 
-**Turn a folder of lecture recordings into one polished study guide.**<br/>
-Transcripts, structured chapters, practice questions and a print-ready PDF, in one run.
+<h1 align="center">Hours of lectures in.<br/>One study guide out.</h1>
 
-[![CI](https://github.com/amroeser/lecture-notes-app/actions/workflows/ci.yml/badge.svg)](https://github.com/amroeser/lecture-notes-app/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-4f46e5.svg)](LICENSE)
-[![Next.js](https://img.shields.io/badge/Next.js-16-000?logo=next.js)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Playwright](https://img.shields.io/badge/E2E-Playwright-2ead33?logo=playwright&logoColor=white)](e2e/)
+<p align="center">
+  Drop in a semester's worth of recordings. You get a transcript, a structured chapter per lecture<br/>
+  and one polished study guide with practice questions, ready as Markdown or PDF.
+</p>
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Transcription providers](#transcription-providers) · [Configuration](#configuration) · [Testing](#testing)
+<p align="center">
+  <a href="https://github.com/amroeser/lecture-notes-app/releases/latest/download/LectureBatchSummarizer-mac-arm64.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/readme/download-mac-arm64-dark.png"><img src="docs/media/readme/download-mac-arm64-light.png" alt="Download for macOS (Apple silicon)" width="300" /></picture></a>
+  <a href="https://github.com/amroeser/lecture-notes-app/releases/latest/download/LectureBatchSummarizer-win-x64-setup.exe"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/readme/download-windows-dark.png"><img src="docs/media/readme/download-windows-light.png" alt="Download for Windows (64-bit installer)" width="300" /></picture></a>
+</p>
+
+<p align="center"><sub>
+  Also for <a href="https://github.com/amroeser/lecture-notes-app/releases/latest/download/LectureBatchSummarizer-mac-x64.dmg">Intel Macs</a> ·
+  as a <a href="https://github.com/amroeser/lecture-notes-app/releases/latest/download/LectureBatchSummarizer-win-x64.zip">portable Windows .zip</a> ·
+  <a href="#run-from-source">from source</a> ·
+  <a href="https://github.com/amroeser/lecture-notes-app/releases/latest">all downloads</a>
+</sub></p>
+
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/media/readme/hero-phone-dark.webp" />
+    <source media="(max-width: 600px)" srcset="docs/media/readme/hero-phone-light.webp" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/readme/hero-dark.webp" />
+    <img src="docs/media/readme/hero-light.webp" width="880" alt="The Statistik I course in the desktop app: three lectures processed into chapters, with the first page of the exported PDF study guide in front." />
+  </picture>
+</p>
+
+<p align="center"><sub>Your courses stay on your computer. Each run sends audio and text to the AI you choose, and only to that one.</sub></p>
 
 <br/>
 
-<a href="docs/media/demo-en.mp4">
-  <img src="docs/media/demo-en.gif" width="880" alt="Demo: three lecture videos are uploaded, processed in parallel and merged into a study guide with a rendered preview" />
-</a>
+## See it work
 
-<sub>▶ Watch the demo as MP4: <a href="docs/media/demo-en.mp4">English</a> · <a href="docs/media/demo-de.mp4">Deutsch</a></sub>
+<p align="center">
+  <a href="docs/media/demo-en.mp4"><img src="docs/media/demo-en.gif" width="880" alt="A 19-second run: three lecture videos are dropped into a course, processed two at a time, and merged into a rendered study guide with a guardrail check." /></a>
+</p>
+<p align="center"><sub>▶ Watch as MP4: <a href="docs/media/demo-en.mp4">English</a> · <a href="docs/media/demo-de.mp4">Deutsch</a></sub></p>
 
-</div>
+## How it works
 
-<br/>
+1. **Create a course.** One course per lecture series. It keeps everything you process in it.
+2. **Drop in the recordings.** Each MP4 is transcribed and turned into a chapter with the same study layout: summary, learning objectives, key points, glossary, examples, common mistakes and practice questions with answers.
+3. **Get the study guide.** Chapters are ordered by learning progression, merged and smoothed. A guardrail check makes sure no lecture went missing, then Markdown and PDF are ready.
 
-## Why
+Add next week's lecture to the same course later. It continues as `V04` and the study guide is rebuilt with it.
 
-Lecture recordings are long, and rewatching them before an exam is slow. This app turns a whole series of MP4 recordings into a single study guide with a fixed structure for every lecture: summary, learning objectives, sub-chapters, key points, glossary, worked examples, common mistakes and practice questions with answers. Chapters are then ordered by learning progression and checked so that no lecture goes missing.
+```mermaid
+flowchart LR
+    A[MP4] --> B[ffmpeg<br/>16 kHz mono]
+    B --> C{Transcription<br/>OpenAI · Voxtral}
+    C --> D[Chapter per lecture]
+    D --> E[Order · merge · smooth]
+    E --> F{Guardrails<br/>all lectures present?}
+    F -->|missing| G[Repair pass] --> F
+    F -->|ok| H[Markdown + PDF]
+```
 
-## Product tour
+## Quick answers
+
+- **Is it free?** Yes. The app is MIT-licensed and needs no account with us. You pay only your AI provider, if it charges you.
+- **Which AI does it use?** Transcription runs on **OpenAI** (`gpt-4o-mini-transcribe`) or **Mistral Voxtral** (`voxtral-small-transcribe-3`) with your API key. Chapters and the study guide run on any **OpenAI-compatible API**, including your company's gateway, or on your **Claude** or **ChatGPT** plan. [All the ways in](#bring-your-own-ai).
+- **Can I use my Claude or ChatGPT plan?** For chapters and the study guide, yes: the app calls the official `claude` (Claude Code) or `codex` CLI that you installed and signed in to yourself. It never asks for, reads or stores your plan credentials. Plan limits are meant for ordinary personal use. Transcription still needs an OpenAI or Mistral key, because neither CLI processes audio.
+- **Where is my data?** Courses, transcripts, chapters and study guides are files on your computer. API keys are encrypted with your system keychain. [Where your data goes](#where-your-data-goes).
+- **How long can a lecture be?** Long recordings are split into segments automatically (10 minutes for OpenAI, 30 for Voxtral) and joined in order. Each OpenAI segment gets the end of the previous one as context.
+- **Which languages?** The app speaks English and German and follows your system language. Lectures are transcribed as German, and the study layout is German.
+- **Why does macOS or Windows warn me?** The installers are not code-signed yet. [Install notes](#install).
+
+## A library for every lecture series
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/desktop-library-en-dark.png" />
+    <img src="docs/media/desktop-library-en-light.png" width="880" alt="The library with three courses: Organic Chemistry II with 1 of 1 videos done, Makroökonomie with 2 of 3 done, and Statistik I with 3 of 3 done and the series ready." />
+  </picture>
+</p>
+
+Each course shows how many lectures are done and whether its study guide is ready. Rename a course in place, delete it with a confirmation, or open it to add the next recordings. A lecture that failed stays in the course and runs again when you drop the same file in.
+
+## The study guide
 
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <b>Batch dashboard</b><br/>
-      <sub>Drag in a series, watch every lecture move from queued to done. Light and dark mode follow your system.</sub><br/><br/>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/media/overview-en-dark.png" />
-        <img src="docs/media/overview-en-light.png" alt="Dashboard with three processed lectures" />
-      </picture>
-    </td>
-    <td width="50%" valign="top">
-      <b>Rendered study guide</b><br/>
-      <sub>Preview the compiled series, edit the Markdown, inspect the guardrail report.</sub><br/><br/>
+    <td width="58%" valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/media/preview-en-dark.png" />
-        <img src="docs/media/preview-en-light.png" alt="Rendered Markdown preview of the study guide with guardrail status" />
+        <img src="docs/media/preview-en-light.png" alt="The rendered study guide with a green guardrail banner: every video is included in the series." />
       </picture>
+      <p><sub><b>Preview, edit, check.</b> Read the rendered guide, edit the Markdown, and see the guardrail report.</sub></p>
     </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <b>Print-ready PDF</b><br/>
-      <sub>A4 export with headings, lists, tables and one page break per chapter.</sub><br/><br/>
-      <img src="docs/media/pdf-page.png" alt="First page of the exported PDF" />
-    </td>
-    <td width="50%" valign="top">
-      <b>Mobile and bilingual</b><br/>
-      <sub>Responsive down to phone width (tested at 390&nbsp;px). The UI speaks German or English, picked from the system language.</sub><br/><br/>
-      <p align="center">
-        <img src="docs/media/mobile-en.png" width="46%" alt="Mobile layout in English" />
-        &nbsp;
-        <img src="docs/media/mobile-de.png" width="46%" alt="Mobile layout in German" />
-      </p>
+    <td width="42%" valign="top">
+      <img src="docs/media/pdf-page.png" alt="First page of the exported A4 PDF with table of contents, summary, learning objectives, key points and a glossary table." />
+      <p><sub><b>Print-ready PDF.</b> A4 with headings, lists, tables and a new page per chapter.</sub></p>
     </td>
   </tr>
 </table>
 
-## Features
-
-| | |
-|---|---|
-| **Batch processing** | Upload a whole series at once. Process 1 to 4 lectures in parallel. Files added mid-run join the queue. |
-| **Fixed study layout** | Every lecture becomes the same chapter structure, so the guide reads like one book. |
-| **Series compilation** | Chapters are ordered by learning progression, de-duplicated and smoothed. Large series use map-reduce. |
-| **Guardrails** | Every lecture carries an ID marker. The final guide is checked, repaired once, and auto-download only happens when nothing is missing. |
-| **Two transcription providers** | OpenAI (`gpt-4o-mini-transcribe` by default) or Mistral Voxtral (`voxtral-small-transcribe-3`). |
-| **Smart caching** | Results are cached by file hash, model and prompt version, so re-runs cost nothing. |
-| **Exports** | Per lecture: transcript and chapter. Per series: Markdown, PDF and the guardrail report as JSON. |
-| **Polished UI** | Light and dark mode, German and English, keyboard accessible, checked with axe against WCAG 2.1 AA. |
-
-## Quick start
-
-> **Requirements:** Node.js 22 or 24 LTS, [ffmpeg](https://ffmpeg.org/) (`brew install ffmpeg` on macOS) and an [OpenAI API key](https://platform.openai.com/api-keys).
-
-```bash
-git clone https://github.com/amroeser/lecture-notes-app.git
-cd lecture-notes-app
-npm install
-cp .env.example .env.local   # add OPENAI_API_KEY
-./start.sh                   # http://localhost:3000
-```
-
-## How it works
-
-```mermaid
-flowchart LR
-    A[MP4 upload] --> B[ffmpeg<br/>16 kHz mono WAV]
-    B --> C{Transcription}
-    C -->|OpenAI<br/>10 min segments| D[Transcript]
-    C -->|Mistral Voxtral<br/>30 min segments| D
-    D --> E[LLM: one chapter<br/>per lecture]
-    E --> F[LLM: order, merge,<br/>smooth]
-    F --> G{Guardrails<br/>all IDs present?}
-    G -->|missing| H[Repair pass] --> G
-    G -->|ok| I[Markdown + PDF]
-```
-
-1. **Upload.** Pick or drop the MP4 files of a series. Each file gets an ID (`V01`, `V02`, …).
-2. **Transcribe.** ffmpeg extracts the audio. The selected provider transcribes it in German. Long recordings are split into segments; each segment gets the end of the previous one as context.
-3. **Write chapters.** A text model turns each transcript into a chapter with the fixed study layout.
-4. **Compile the series.** Chapters are ordered, merged and polished. Big series are compiled in chunks and merged again.
-5. **Check and export.** Guardrails confirm every ID is present, then Markdown and PDF are ready.
-
 <details>
-<summary><b>Example chapter structure</b></summary>
+<summary><b>The chapter layout</b></summary>
 
 ```markdown
 # Kapitel: Hypothesentests
@@ -127,12 +117,7 @@ flowchart LR
 Ein Hypothesentest prüft, ob beobachtete Daten mit einer Nullhypothese vereinbar sind …
 
 ## Lernziele
-- Null- und Alternativhypothese formulieren
-
 ## Unterkapitel
-### Fehler 1. und 2. Art
-- …
-
 ## Kernpunkte
 ## Begriffe & Definitionen
 | Begriff | Definition |
@@ -148,109 +133,142 @@ Ein Hypothesentest prüft, ob beobachtete Daten mit einer Nullhypothese vereinba
 
 </details>
 
-## Transcription providers
+## Bring your own AI
 
-Chapter and series generation always use the OpenAI-compatible text API. Only the transcription step is switchable.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/desktop-settings-en-dark.png" />
+    <img src="docs/media/desktop-settings-en-light.png" width="880" alt="Settings, Chapters & series: the Claude plan via Claude Code option is selected and the installed Claude Code CLI is found." />
+  </picture>
+</p>
 
-| Provider | Setting | Default model | Notes |
-|---|---|---|---|
-| **OpenAI** | `TRANSCRIBE_PROVIDER=openai` (default) | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` for higher quality. Audio above 24 MB is sent in 10-minute segments (OpenAI's upload limit is 25 MB). |
-| **Mistral Voxtral** | `TRANSCRIBE_PROVIDER=mistral` | `voxtral-small-transcribe-3` | Needs `MISTRAL_API_KEY`. Audio is sent in 30-minute segments and joined in order. `voxtral-mini-transcribe-3` is the cheaper option. |
+Open **Settings** in the app. Two choices, set independently:
 
-```bash
-# .env.local – transcribe with Voxtral, write chapters with OpenAI
-TRANSCRIBE_PROVIDER=mistral
-MISTRAL_API_KEY=...
-OPENAI_API_KEY=sk-...
-```
+| Step | Options | What you need |
+|---|---|---|
+| **Transcription** | OpenAI · Mistral Voxtral | An API key. Optional: a base URL for an OpenAI-compatible gateway. |
+| **Chapters & study guide** | API (OpenAI-compatible) · Claude plan via Claude Code · ChatGPT plan via Codex CLI | An API key or gateway, **or** the [Claude Code](https://github.com/anthropics/claude-code) or [Codex](https://github.com/openai/codex) CLI, installed and signed in (run `claude` and log in, or `codex login`). |
 
-## Configuration
+**Test connection** checks the key against the provider, or the CLI's version. Keys are shown as *set* or *not set* and never displayed again.
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `OPENAI_API_KEY` | Yes | | Key for the text models, and for transcription with the OpenAI provider. |
-| `OPENAI_BASE_URL` | No | OpenAI | Base URL for OpenAI-compatible providers. |
-| `OPENAI_TEXT_API_KEY` / `OPENAI_TEXT_BASE_URL` | No | | Separate credentials for the text models. |
-| `TRANSCRIBE_PROVIDER` | No | `openai` | `openai` or `mistral`. |
-| `OPENAI_TRANSCRIBE_MODEL` | No | `gpt-4o-mini-transcribe` | Transcription model for the OpenAI provider. |
-| `OPENAI_TRANSCRIBE_CHUNK_SECONDS` | No | `600` | Segment length for audio above 24 MB (minimum 60). |
-| `MISTRAL_API_KEY` | With `mistral` | | Mistral API key. |
-| `MISTRAL_BASE_URL` | No | `https://api.mistral.ai/v1` | Mistral API base URL. |
-| `MISTRAL_TRANSCRIBE_MODEL` | No | `voxtral-small-transcribe-3` | Voxtral model. |
-| `MISTRAL_TRANSCRIBE_CHUNK_SECONDS` | No | `1800` | Segment length in seconds (minimum 60). |
-| `OPENAI_SUMMARY_MODEL` | No | `gpt-5.1-mini` | Model for chapter generation. |
-| `OPENAI_SERIES_MODEL` | No | summary model | Model for ordering and compiling the series. |
-| `OPENAI_SERIES_FINAL_MODEL` | No | series model | Model for the final reduce step of large series. |
-| `SERIES_CHUNK_SIZE` | No | `4` | Chapters per chunk in map-reduce. |
-| `MAX_SERIES_COMPILE_CHARS` | No | `60000` | Above this size the LLM compile step is skipped. |
-| `CACHE_DIR` | No | `.cache/lecture-notes-app` | Filesystem cache. |
+## Install
 
-`.env.example` lists every variable with comments.
-
-## Testing
-
-The end-to-end suite runs against a production build in Chromium, on a desktop and a mobile viewport. The OpenAI and Mistral routes are mocked in the browser, so **tests never call a paid API**.
+**macOS.** Open the DMG and drag the app to *Applications*. The app is not notarized yet, so the first start is blocked: Control-click the app, choose **Open**, then **Open** again, or allow it under *System Settings → Privacy & Security*. If macOS says the app is damaged, clear the download flag once:
 
 ```bash
-npx playwright install chromium   # once
-npm run test:e2e                  # 26 tests: flows, errors, guardrails, i18n, layout, axe a11y
-npm run lint && npm run typecheck
+xattr -dr com.apple.quarantine "/Applications/Lecture Batch Summarizer.app"
 ```
 
-Covered: the full batch with auto-downloads, the non-MP4 filter, a failed lecture and its retry, the guardrail warning, Markdown editing, local merge, clearing the list, no horizontal overflow, WCAG 2.1 AA in light and dark mode, and language detection with manual override.
+**Windows.** Run the installer. SmartScreen shows *Windows protected your PC* for unsigned apps: choose **More info → Run anyway**. The portable `.zip` runs without installing.
+
+On start the app checks GitHub for a newer release and links to it. It does not update itself.
+
+### Run from source
+
+Requires Node.js 22 or 24 and [ffmpeg](https://ffmpeg.org/).
+
+```bash
+git clone https://github.com/amroeser/lecture-notes-app.git
+cd lecture-notes-app
+npm install
+cp .env.example .env.local   # set OPENAI_API_KEY (or another provider, see below)
+npm run dev                  # web app on http://localhost:3000
+npm run desktop:dev          # or the desktop app
+npm run desktop:dist         # build an installer for this platform
+```
+
+## Where your data goes
+
+| What | Where |
+|---|---|
+| Courses, chapters, transcripts, study guides | `library/<course>/course.json` in the app's data folder (`LBS_DATA_DIR` when run from source, default `.data/`) |
+| Cache of processed lectures | The app's cache folder (`CACHE_DIR`), keyed by file hash, model and prompt version, so re-runs cost nothing |
+| API keys | Encrypted with the system keychain (macOS Keychain, Windows DPAPI) in the app's settings |
+| Your audio and text | Sent only to the providers you picked, under their terms |
+
+The app runs its local server on `127.0.0.1` with a random port. Every API call needs a token created for that launch, so other programs and web pages cannot use it.
 
 <details>
-<summary><b>Regenerating the README media</b></summary>
+<summary><b>All environment variables</b> (for running from source)</summary>
 
-Screenshots, the PDF preview and the demo videos are produced by Playwright from fixture data:
+| Variable | Default | Purpose |
+|---|---|---|
+| `TRANSCRIBE_PROVIDER` | `openai` | `openai` or `mistral` |
+| `OPENAI_API_KEY` | | Key for OpenAI transcription and, by default, for text |
+| `OPENAI_BASE_URL` | OpenAI | OpenAI-compatible base URL |
+| `OPENAI_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | Transcription model (OpenAI) |
+| `OPENAI_TRANSCRIBE_CHUNK_SECONDS` | `600` | Segment length for audio above 24 MB |
+| `MISTRAL_API_KEY` | | Key for Voxtral |
+| `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral base URL |
+| `MISTRAL_TRANSCRIBE_MODEL` | `voxtral-small-transcribe-3` | Voxtral model |
+| `MISTRAL_TRANSCRIBE_CHUNK_SECONDS` | `1800` | Segment length (minimum 60) |
+| `TEXT_PROVIDER` | `openai` | `openai`, `claude-code` or `codex` |
+| `OPENAI_TEXT_API_KEY` / `OPENAI_TEXT_BASE_URL` | | Separate credentials for text |
+| `OPENAI_SUMMARY_MODEL` | `gpt-5.1-mini` | Chapter model |
+| `OPENAI_SERIES_MODEL` | summary model | Series model |
+| `OPENAI_SERIES_FINAL_MODEL` | series model | Final reduce step for large series |
+| `CLAUDE_CODE_PATH` / `CODEX_PATH` | `claude` / `codex` | CLI binaries |
+| `CLI_TEXT_MODEL` | CLI default | Model for the CLI provider |
+| `CLI_TEXT_TIMEOUT_MS` | `600000` | Timeout per CLI call |
+| `CLI_TEXT_MAX_CONCURRENCY` | `2` | Parallel CLI calls |
+| `SERIES_CHUNK_SIZE` | `4` | Chapters per map-reduce chunk |
+| `MAX_SERIES_COMPILE_CHARS` | `60000` | Above this the LLM compile step is skipped |
+| `LBS_DATA_DIR` | `.data` | Course library |
+| `CACHE_DIR` | `.cache/lecture-notes-app` | Processing cache |
+| `FFMPEG_PATH` | `ffmpeg` | ffmpeg binary |
+
+</details>
+
+## For developers
+
+<details>
+<summary><b>Tests, scripts and media</b></summary>
 
 ```bash
-npm run media             # docs/media/*.png and raw recordings
-scripts/build-media.sh    # MP4 + GIF via ffmpeg
+npm run lint && npm run typecheck
+npm run test:e2e                                 # 54 browser tests, desktop + mobile viewports, mocked AI
+npm run desktop:build && npm run test:desktop    # Electron: start, token, encrypted keys, CLI status
+node scripts/test-cli-providers.mjs              # claude/codex providers against fake CLIs
+```
+
+The browser tests cover the full batch with auto-downloads, errors and retries, guardrail warnings, the library (persistence, `V04`, rename, delete), language detection and WCAG 2.1 AA with axe in light and dark mode. AI routes are mocked, so **tests never call a paid API**.
+
+Regenerate the README media:
+
+```bash
+npm run media                                                       # screenshots, demo recordings, PDF page
+npm run desktop:build && LBS_MEDIA=1 npm run test:desktop -- media  # desktop window captures
+scripts/build-media.sh && node scripts/readme-art.mjs               # MP4/GIF, hero, download buttons
+```
+
+Releases: bump `version` in `package.json` and push a tag `v<version>`. The release workflow builds the macOS (arm64, x64) and Windows (x64) installers into a draft release.
+
+</details>
+
+<details>
+<summary><b>Project structure</b></summary>
+
+```
+electron/src/            desktop shell: server process, settings, keychain, CLI detection, update check
+src/app/                 Next.js App Router: library (/), course (/course/[id]), settings
+src/app/api/             process-lecture, series-summary, series-pdf, library
+src/app/api/_utils/      transcription providers, text providers (API + CLI), cache
+src/lib/library/         course store (atomic JSON writes, per-course queue)
+src/components/          UI: library, course workspace, settings, primitives
+src/i18n/                German and English
+e2e/ · e2e-desktop/      Playwright browser and Electron tests, media capture
 ```
 
 </details>
 
-## Project structure
-
-```
-src/
-├── app/
-│   ├── api/
-│   │   ├── process-lecture/   # MP4 → audio → transcript → chapter
-│   │   ├── series-summary/    # chapters → ordered, checked series
-│   │   ├── series-pdf/        # Markdown → PDF (jsPDF)
-│   │   └── _utils/            # cache, transcription providers
-│   ├── layout.tsx
-│   └── page.tsx
-├── components/
-│   ├── LectureNotesApp.tsx    # main UI
-│   └── ui.tsx                 # buttons, cards, toggles, icons
-└── i18n/                      # German/English messages, locale detection
-e2e/                           # Playwright tests, fixtures, media capture
-```
-
-## Tech stack
-
-Next.js 16 (App Router, Turbopack, React Compiler) · React 19 · Tailwind CSS 4 · TypeScript 6 · OpenAI SDK 7 · Mistral Voxtral · jsPDF 4 · react-markdown · Playwright + axe-core · ffmpeg
-
-## Contributing
-
-Issues and pull requests are welcome. Please run `npm run lint`, `npm run typecheck` and `npm run test:e2e` before opening a PR.
+**Stack:** Electron 45 · Next.js 16 (standalone, React Compiler) · React 19 · Tailwind CSS 4 · TypeScript 6 · OpenAI SDK 7 · Mistral Voxtral · jsPDF 4 · ffmpeg · Playwright + axe-core
 
 ## Disclaimer
 
-This project is provided **as is, without warranty**.
+Provided **as is, without warranty**. Study guides are AI-generated and **can contain errors**: they support studying, they do not replace it. API usage costs money, and the author accepts no liability for provider charges. Only process recordings you have the right to use.
 
-- Summaries depend on audio quality and the model used. **They can contain errors** and do not replace your own studying.
-- API usage costs money. The author accepts **no liability for API charges**.
-- Only upload recordings you **have the right to process**.
-- Transcripts and summaries are cached on disk. Protect them like any other personal data.
+## License and credits
 
-## Author
+[MIT](LICENSE) · Made by **Alexander Maximilian Röser** · [GitHub @amroeser](https://github.com/amroeser) · [alexanderroeser.de](https://alexanderroeser.de)
 
-**Alexander Maximilian Röser** · [GitHub @amroeser](https://github.com/amroeser) · [alexanderroeser.de](https://alexanderroeser.de)
-
-## License
-
-[MIT](LICENSE)
+ffmpeg is bundled from [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) under its own license (GPL). The license files ship inside the app.
