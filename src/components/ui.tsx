@@ -139,7 +139,8 @@ export function Button({
       type="button"
       {...rest}
       className={cx(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors',
+        'inline-flex items-center justify-center gap-2 rounded-lg font-medium',
+        'transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-150 ease-out active:scale-[0.97]',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
         'disabled:cursor-not-allowed disabled:opacity-45',
         size === 'sm' ? 'h-8 px-3 text-xs' : 'h-10 px-4 text-sm',
@@ -212,7 +213,7 @@ export function Toggle({
           onChange={(e) => onChange(e.target.checked)}
         />
         <span className="h-5 w-9 rounded-full bg-zinc-300 transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent dark:bg-zinc-700" />
-        <span className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+        <span className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ease-out peer-checked:translate-x-4" />
       </span>
     </label>
   );
@@ -242,7 +243,7 @@ export function Segmented<T extends string | number>({
           disabled={disabled}
           onClick={() => onChange(o.value)}
           className={cx(
-            'h-7 min-w-9 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+            'h-7 min-w-9 rounded-md px-2.5 text-xs font-medium transition-[color,background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-accent',
             value === o.value ? 'bg-surface text-foreground shadow-sm' : 'text-muted hover:text-foreground',
           )}
         >
@@ -330,7 +331,7 @@ export function ConfirmDialog({
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
-      className="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-line bg-surface p-0 text-foreground shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm"
+      className="dialog-pop m-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-line bg-surface p-0 text-foreground shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-sm"
     >
       <div className="p-5 sm:p-6">
         <div className="flex items-start gap-3">

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import { createCourse, fakeVideo, lectures, mockApi, seriesMarkdown, seriesTitle } from './fixtures';
+import { createCourse, fakeVideo, lectures, mockApi, seriesMarkdown, seriesTitle, settleAnimations } from './fixtures';
 
 const OUT = path.join(process.cwd(), 'docs', 'media');
 const RAW = path.join(OUT, 'raw');
@@ -120,18 +120,22 @@ for (const { id, locale } of locales) {
       await page.goto('/');
       await expect(page.getByTestId('course-card').first()).toBeVisible();
       await page.waitForTimeout(400);
+      await settleAnimations(page);
       await page.screenshot({ path: path.join(OUT, `library-${id}-${colorScheme}.png`) });
 
       await withTempCourse(request, async (courseId) => {
         await page.goto(`/course/${courseId}`);
         await expect(page.getByTestId('file-input')).toBeAttached();
         await page.waitForTimeout(400);
+        await settleAnimations(page);
         await page.screenshot({ path: path.join(OUT, `empty-${id}-${colorScheme}.png`) });
         await runFlow(page);
         await page.evaluate(() => window.scrollTo(0, 0));
         await page.waitForTimeout(400);
+        await settleAnimations(page);
         await page.screenshot({ path: path.join(OUT, `overview-${id}-${colorScheme}.png`) });
         const output = page.getByTestId('series-preview').locator('xpath=ancestor::section[1]');
+        await settleAnimations(page);
         await output.screenshot({ path: path.join(OUT, `preview-${id}-${colorScheme}.png`) });
       });
       await ctx.close();
@@ -145,6 +149,7 @@ for (const { id, locale } of locales) {
       await runFlow(m);
       await m.evaluate(() => window.scrollTo(0, 0));
       await m.waitForTimeout(300);
+      await settleAnimations(m);
       await m.screenshot({ path: path.join(OUT, `mobile-${id}.png`) });
     });
     await mobile.close();

@@ -190,3 +190,8 @@ export async function openCourse(page: Page, title = uniqueTitle()) {
   await expect(page.getByTestId('file-input')).toBeAttached();
   return { id, title };
 }
+
+/** Wait for entrance animations/transitions to finish, so checks like axe colour contrast see final opacity. */
+export async function settleAnimations(page: Page) {
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+}
