@@ -31,10 +31,6 @@ function vidMarker(videoId: string) {
   return `<!--VID:${videoId}-->`;
 }
 
-function hasVidMarker(text: string, videoId: string) {
-  return text.includes(vidMarker(videoId));
-}
-
 function hasChapterHeading(md: string, videoId: string) {
   const marker = vidMarker(videoId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`^#\\s+.*${marker}\\s*$`, 'm');
@@ -134,7 +130,9 @@ function extractTitle(md: string) {
   return m?.[1]?.trim();
 }
 
-function withOptionalTemperature(req: any, model: string, temperature: number) {
+type ChatReq = OpenAI.ChatCompletionCreateParamsNonStreaming;
+
+function withOptionalTemperature(req: ChatReq, model: string, temperature: number) {
   if (!/^gpt-5/i.test(model)) {
     req.temperature = temperature;
   }
@@ -148,7 +146,7 @@ async function orderChapters(client: OpenAI, model: string, chapters: ChapterInp
     chapterTitle: c.chapterTitle || extractTitle(c.chapterMarkdown) || c.fileName,
   }));
 
-  const req: any = {
+  const req: ChatReq = {
     model,
     messages: [
       {
@@ -172,7 +170,7 @@ async function orderChapters(client: OpenAI, model: string, chapters: ChapterInp
   const jsonEnd = content.lastIndexOf('}');
   const slice = jsonStart >= 0 && jsonEnd >= 0 ? content.slice(jsonStart, jsonEnd + 1) : content;
 
-  let parsed: any;
+  let parsed: { order?: unknown } | null;
   try {
     parsed = JSON.parse(slice);
   } catch {
@@ -205,7 +203,7 @@ function buildBaseMarkdown(seriesTitle: string, ordered: ChapterInput[]) {
 async function compileSeries(client: OpenAI, model: string, seriesTitle: string, ordered: ChapterInput[]) {
   const baseMarkdown = buildBaseMarkdown(seriesTitle, ordered);
 
-  const req: any = {
+  const req: ChatReq = {
     model,
     messages: [
       {
@@ -239,7 +237,7 @@ async function reduceChunksToFinal(
     .join('')
     .trim();
 
-  const req: any = {
+  const req: ChatReq = {
     model: finalModel,
     messages: [
       {
@@ -273,7 +271,7 @@ export async function POST(req: Request) {
   const seriesModel = process.env.OPENAI_SERIES_MODEL || process.env.OPENAI_SUMMARY_MODEL || 'gpt-5.1-mini';
   const seriesFinalModel = process.env.OPENAI_SERIES_FINAL_MODEL || seriesModel;
 
-  let payload: any;
+  let payload: { seriesTitle?: unknown; chapters?: unknown } | null;
   try {
     payload = await req.json();
   } catch {
@@ -332,7 +330,7 @@ export async function POST(req: Request) {
       }),
     );
 
-    const cached = await readJsonCache<any>('series-summary', seriesCacheKey);
+    const cached = await readJsonCache<{ seriesMarkdown?: string; guardrailReport?: unknown }>('series-summary', seriesCacheKey);
     if (cached?.seriesMarkdown && cached?.guardrailReport) {
       return NextResponse.json({
         orderedChapters: orderedChapters.map((c) => ({
@@ -384,7 +382,7 @@ export async function POST(req: Request) {
     const missingIds = uniqueIds.filter((id: string) => !hasChapterHeading(seriesMarkdown, id));
 
     if (!usedSizeFallback && missingIds.length > 0) {
-      const req: any = {
+      const req: ChatReq = {
         model: seriesModel,
         messages: [
           {
@@ -448,8 +446,8 @@ export async function POST(req: Request) {
       seriesMarkdown: publicSeriesMarkdown,
       guardrailReport,
     });
-  } catch (err: any) {
-    const message = typeof err?.message === 'string' ? err.message : 'Unknown error';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

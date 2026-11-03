@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { createReadStream } from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
 import { readJsonCache, sha256Hex, writeJsonCache } from '../_utils/fsCache';
+import { readTranscribeConfig, transcribeAudio, TranscribeConfigError, type TranscribeConfig } from '../_utils/transcribe';
 
 export const runtime = 'nodejs';
 
@@ -30,7 +30,7 @@ function runFfmpegExtractAudio(args: string[]): Promise<{ stdout: string; stderr
         stderr += d.toString();
       });
 
-      proc.on('error', (err: any) => {
+      proc.on('error', (err: NodeJS.ErrnoException) => {
         if (err?.code === 'ENOENT') {
           if (!triedFallback && cmd !== fallbackCmd) {
             triedFallback = true;
@@ -79,19 +79,27 @@ function extractChapterTitle(md: string) {
 }
 
 export async function POST(req: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  let transcribeConfig: TranscribeConfig;
+  try {
+    transcribeConfig = readTranscribeConfig();
+  } catch (err: unknown) {
+    const message = err instanceof TranscribeConfigError ? err.message : 'Invalid transcription configuration.';
+    return NextResponse.json({ error: message, step: 'config' }, { status: 500 });
+  }
+
+  // Chapter generation always uses the OpenAI-compatible text client, independent of the transcription provider.
+  const baseURL = process.env.OPENAI_BASE_URL || undefined;
+  const textApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
+  const textBaseURL = process.env.OPENAI_TEXT_BASE_URL || baseURL;
+  if (!textApiKey) {
     return NextResponse.json(
-      { error: 'Missing OPENAI_API_KEY in environment.' },
+      { error: 'Missing OPENAI_API_KEY (or OPENAI_TEXT_API_KEY) in environment for chapter generation.', step: 'config' },
       { status: 500 },
     );
   }
 
-  const baseURL = process.env.OPENAI_BASE_URL || undefined;
-  const textApiKey = process.env.OPENAI_TEXT_API_KEY || apiKey;
-  const textBaseURL = process.env.OPENAI_TEXT_BASE_URL || baseURL;
-
-  const transcribeModel = process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe';
+  const transcribeProvider = transcribeConfig.provider;
+  const transcribeModel = transcribeConfig.model;
   const summaryModel = process.env.OPENAI_SUMMARY_MODEL || 'gpt-5.1-mini';
   const temperature = Number(process.env.OPENAI_TEMPERATURE ?? '0.2');
 
@@ -113,7 +121,7 @@ export async function POST(req: Request) {
 
   const inputPath = path.join(tmpDir, `${jobId}.mp4`);
   const audioPath = path.join(tmpDir, `${jobId}.wav`);
-  let step: 'write_input' | 'extract_audio' | 'transcribe' | 'chapter' = 'write_input';
+  let step: 'write_input' | 'extract_audio' | 'split_audio' | 'transcribe' | 'chapter' = 'write_input';
 
   try {
     step = 'write_input';
@@ -136,13 +144,14 @@ export async function POST(req: Request) {
       audioPath,
     ]);
 
-    const transcribeClient = new OpenAI({ apiKey, baseURL });
     const textClient = new OpenAI({ apiKey: textApiKey, baseURL: textBaseURL });
 
     const promptVersion = 'chapter-v3';
     const cacheKey = sha256Hex(
       JSON.stringify({
         fileHash,
+        // Omitted for "openai" so caches written before provider selection existed stay valid.
+        ...(transcribeProvider !== 'openai' && { transcribeProvider }),
         transcribeModel,
         summaryModel,
         temperature: /^gpt-5/i.test(summaryModel) ? null : temperature,
@@ -150,7 +159,7 @@ export async function POST(req: Request) {
       }),
     );
 
-    const cached = await readJsonCache<any>('process-lecture', cacheKey);
+    const cached = await readJsonCache<{ transcript?: string; chapterTitle?: string; chapterMarkdown?: string }>('process-lecture', cacheKey);
     if (cached?.chapterMarkdown && typeof cached?.transcript === 'string') {
       return NextResponse.json({
         fileName: file.name,
@@ -162,16 +171,20 @@ export async function POST(req: Request) {
     }
 
     step = 'transcribe';
-    const transcription = await transcribeClient.audio.transcriptions.create({
-      file: createReadStream(audioPath),
-      model: transcribeModel,
+    const transcriptText = await transcribeAudio(transcribeConfig, audioPath, {
       language: 'de',
+      splitAudio: async (seconds) => {
+        step = 'split_audio';
+        const pattern = path.join(tmpDir, `${jobId}-part-%03d.wav`);
+        await runFfmpegExtractAudio(['-y', '-i', audioPath, '-f', 'segment', '-segment_time', String(seconds), '-c', 'copy', pattern]);
+        const parts = (await fs.readdir(tmpDir)).filter((f) => f.startsWith(`${jobId}-part-`) && f.endsWith('.wav')).sort();
+        step = 'transcribe';
+        return parts.map((f) => path.join(tmpDir, f));
+      },
     });
 
-    const transcriptText = transcription.text ?? '';
-
     step = 'chapter';
-    const chapterReq: any = {
+    const chapterReq: OpenAI.ChatCompletionCreateParamsNonStreaming = {
       model: summaryModel,
       messages: [
         {
@@ -202,6 +215,7 @@ export async function POST(req: Request) {
       chapterMarkdown,
       fileName: file.name,
       fileHash,
+      transcribeProvider,
       transcribeModel,
       summaryModel,
       promptVersion,
@@ -215,8 +229,8 @@ export async function POST(req: Request) {
       chapterTitle,
       chapterMarkdown,
     });
-  } catch (err: any) {
-    const message = typeof err?.message === 'string' ? err.message : 'Unknown error';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
     console.error('[process-lecture] error', { step, message, err });
     return NextResponse.json({ error: message, step }, { status: 500 });
   } finally {
